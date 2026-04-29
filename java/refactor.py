@@ -255,10 +255,26 @@ def _refactor_whole_file(file: str, original: str, rules: str,
                 log(f"  {file_name}: Sincronização global restaurou o build! ✓", "OK")
 
     if not success:
-        log(f"  {file_name}: Build persiste com erro. Ativando Auto-Cura local...", "WARN")
-        # Extrai linhas de erro para a IA
-        error_lines = [l for l in build_output.splitlines() if "[ERROR]" in l][:10]
-        error_msg = "\n".join(error_lines) or "Unknown Build Error (Maven)"
+        log(f"  {file_name}: Build persiste com erro. Ativando Diagnóstico de Precisão...", "WARN")
+        
+        # Skill: Raio-X de Erros
+        # Extrai os snippets reais do código que causaram a falha
+        error_diagnostics = []
+        raw_error_lines = [l for l in build_output.splitlines() if "[ERROR]" in l and ".java:[" in l][:5]
+        
+        for err_line in raw_error_lines:
+            # Tenta pegar: /caminho/Arquivo.java:[linha,coluna]
+            m = re.search(r'([^ ]+\.java):\[(\d+)', err_line)
+            if m:
+                fpath, lnum = m.group(1), int(m.group(2))
+                try:
+                    code_snippet = _get_line_from_file(fpath, lnum)
+                    diag = f"Erro em {os.path.basename(fpath)} L{lnum}: {code_snippet.strip()}\n      -> {err_line.split('] ', 1)[-1]}"
+                    error_diagnostics.append(diag)
+                    log(f"  [Raio-X] {diag}", "ERR")
+                except: pass
+
+        error_msg = "\n".join(error_diagnostics) or "\n".join(build_output.splitlines()[:10])
         
         corrected_code = call_ai_with_correction(
             original     = original,
@@ -267,7 +283,7 @@ def _refactor_whole_file(file: str, original: str, rules: str,
             file_name    = file_name,
             file_path    = file,
             bad_output   = new_code,
-            error_reason = f"Maven Build Error:\n{error_msg}",
+            error_reason = f"Falha de Compilação Maven:\n{error_msg}",
             phase        = phase
         )
 
@@ -529,3 +545,11 @@ def _extract_missing_symbol_and_target(maven_line: str) -> tuple[str | None, str
         symbol = m_sym.group(1) if m_sym else None
         
     return symbol, class_name
+
+def _get_line_from_file(file_path: str, line_number: int) -> str:
+    """Retorna uma linha específica de um arquivo."""
+    with open(file_path, 'r', encoding='utf-8') as f:
+        for i, line in enumerate(f, 1):
+            if i == line_number:
+                return line
+    return ""
