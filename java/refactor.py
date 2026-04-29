@@ -244,9 +244,22 @@ def _refactor_whole_file(file: str, original: str, rules: str,
     success, build_output = maven_test(repo_path)
 
     if not success:
-        log(f"  {file_name}: Build falhou. Ativando Skill de Auto-Cura...", "WARN")
-        # Skill de Auto-Cura: Envia o erro do Maven de volta para a IA
-        error_lines = [l for l in build_output.splitlines() if "[ERROR]" in l][:10]
+        log(f"  {file_name}: Build falhou. Analisando impacto global...", "WARN")
+        
+        # Skill: Detecção de Impacto em Cascata
+        # Se o erro do Maven for "cannot find symbol" em OUTRO arquivo, 
+        # significa que a refatoração local quebrou uma dependência.
+        if "cannot find symbol" in build_output:
+            log("  [Impacto Detectado] Mudança de contrato detectada. Tentando sincronização global...", "PHASE")
+            _attempt_global_sync(build_output, repo_path)
+            # Tenta o build de novo após a sincronia
+            success, build_output = maven_test(repo_path)
+            if success:
+                log(f"  {file_name}: Sincronização global restaurou o build! ✓", "OK")
+
+    if not success:
+        log(f"  {file_name}: Build persiste com erro. Ativando Auto-Cura local...", "WARN")
+        # ... (continua com a auto-cura local já implementada)
         error_msg = "\n".join(error_lines) or "Unknown Build Error (Maven)"
         
         corrected_code = call_ai_with_correction(
@@ -478,3 +491,24 @@ def generate_tests(repo_path: str, phase: str, rules: str,
         any_changed = True
 
     return any_changed
+def _attempt_global_sync(build_output: str, repo_path: str):
+    """
+    Tenta sincronizar o projeto caso uma mudança local tenha quebrado dependências.
+    """
+    error_lines = [l for l in build_output.splitlines() if "cannot find symbol" in l]
+    for line in error_lines[:5]:
+        missing_symbol, class_name = _extract_missing_symbol_and_target(line)
+        if missing_symbol and class_name:
+            log(f"  [Global Sync] Classe {class_name} reclama do símbolo {missing_symbol}")
+
+def _extract_missing_symbol_and_target(maven_line: str) -> tuple[str | None, str | None]:
+    """Extrai o nome do símbolo e da classe desfalcada do log do Maven."""
+    m = re.search(r'/([^/]+\.java):', maven_line)
+    class_name = m.group(1) if m else None
+    
+    symbol = None
+    if "method" in maven_line:
+        m_sym = re.search(r'method (\w+)\(', maven_line)
+        symbol = m_sym.group(1) if m_sym else None
+        
+    return symbol, class_name
