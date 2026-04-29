@@ -279,9 +279,11 @@ def _refactor_whole_file(file: str, original: str, rules: str,
         # Skill: Registro de Diagnóstico para análise posterior
         exec_logger.log_detailed_diagnostic(phase, file_name, build_output, error_diagnostics)
 
-        # Skill: Reforço de Import
+        # Skill: Reforço de Import com Dicionário Global
         if "cannot find symbol" in error_summary:
-            error_summary += "\nDICA: O erro 'cannot find symbol' geralmente indica um IMPORT FALTANTE ou nome de classe incorreto. Verifique o bloco de imports."
+            from java.dictionary import build_project_dictionary
+            proj_map = build_project_dictionary(repo_path)
+            error_summary += f"\n\n{proj_map}\n\nDICA: Use o mapa acima para adicionar o IMPORT correto."
         
         corrected_code = call_ai_with_correction(
             original     = original,
