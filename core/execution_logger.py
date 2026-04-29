@@ -160,6 +160,37 @@ class ExecutionLogger:
             message="mvn clean test FALHOU",
         )
 
+    def log_detailed_diagnostic(self, phase: str, file: str, error_output: str, diagnostics: list) -> None:
+        """Salva um relatório completo da falha para análise técnica posterior."""
+        diag_dir = os.path.join(self.logs_dir, "diagnostics")
+        os.makedirs(diag_dir, exist_ok=True)
+        
+        safe_file_name = file.replace("/", "_").replace(".", "_")
+        diag_file = os.path.join(diag_dir, f"diag_{phase}_{safe_file_name}_{datetime.now().strftime('%H%M%S')}.txt")
+        
+        with open(diag_file, "w", encoding="utf-8") as f:
+            f.write(f"RELATÓRIO DE DIAGNÓSTICO DE FALHA\n")
+            f.write(f"="*40 + "\n")
+            f.write(f"Arquivo: {file}\n")
+            f.write(f"Fase:    {phase}\n")
+            f.write(f"Data:    {datetime.now().isoformat()}\n")
+            f.write(f"="*40 + "\n\n")
+            
+            f.write("RESUMO RAIO-X (TRECHOS DE CÓDIGO):\n")
+            for d in diagnostics:
+                f.write(f"- {d}\n")
+            f.write("\n" + "="*40 + "\n\n")
+            
+            f.write("LOG COMPLETO DO MAVEN:\n")
+            f.write(error_output)
+            f.write("\n" + "="*40 + "\n")
+        
+        self._write(
+            phase=phase, file=file,
+            event="DIAGNOSTIC_SAVED", status="INFO",
+            message=f"Log detalhado salvo em: {os.path.basename(diag_file)}"
+        )
+
     # ------------------------------------------------------------------
     # Escrita interna
     # ------------------------------------------------------------------

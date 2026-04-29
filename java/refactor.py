@@ -276,6 +276,9 @@ def _refactor_whole_file(file: str, original: str, rules: str,
 
         error_summary = "\n".join(error_diagnostics) or "\n".join(build_output.splitlines()[:5])
         
+        # Skill: Registro de Diagnóstico para análise posterior
+        exec_logger.log_detailed_diagnostic(phase, file_name, build_output, error_diagnostics)
+
         # Skill: Reforço de Import
         if "cannot find symbol" in error_summary:
             error_summary += "\nDICA: O erro 'cannot find symbol' geralmente indica um IMPORT FALTANTE ou nome de classe incorreto. Verifique o bloco de imports."
