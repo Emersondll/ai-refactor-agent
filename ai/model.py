@@ -13,7 +13,7 @@ import anthropic
 
 from config import (
     TIMEOUT, MAX_RETRIES,
-    PRIMARY_MODEL, FALLBACK_MODEL, TERTIARY_MODEL, QUATERNARY_MODEL,
+    MODEL_DOC, MODEL_STRUCT, MODEL_CLEAN, MODEL_SOLID,
     CLAUDE_MODEL, CLAUDE_API_KEY, USE_CLAUDE_FALLBACK,
 )
 from ai.prompt import build_prompt
@@ -221,10 +221,10 @@ def _run_pipeline(prompt: str, code: str, file_path: str,
     agent_priority = select_agent_priority(file_type, complexity, mode, phase)
 
     agent_map = {
-        "light":    PRIMARY_MODEL,
-        "standard": FALLBACK_MODEL,
-        "advanced": TERTIARY_MODEL,
-        "ultimate": QUATERNARY_MODEL,
+        "light":    MODEL_DOC,
+        "standard": MODEL_STRUCT,
+        "advanced": MODEL_CLEAN,
+        "ultimate": MODEL_SOLID,
     }
 
     local_agents = [a for a in agent_priority if a != "claude"]
@@ -246,10 +246,10 @@ def _run_pipeline(prompt: str, code: str, file_path: str,
         result = _try_local_agent(agent, model_name, prompt, temperature=temp)
         if result:
             # Skill: Meticulous Review (O Crítico)
-            # Se o refactor foi feito por um modelo menor, pede revisão para o Ultimate
-            if agent != "ultimate" and QUATERNARY_MODEL and QUATERNARY_MODEL not in _OOM_MODELS:
-                log(f"  [Skill: Crítico] Solicitando revisão técnica para {QUATERNARY_MODEL}...")
-                result = _polish_result(result, prompt, QUATERNARY_MODEL)
+            # Se o refactor foi feito por um modelo menor, pede revisão para o Ultimate (SOLID)
+            if agent != "ultimate" and MODEL_SOLID and MODEL_SOLID not in _OOM_MODELS:
+                log(f"  [Skill: Crítico] Solicitando revisão técnica para {MODEL_SOLID}...")
+                result = _polish_result(result, prompt, MODEL_SOLID)
             
             if result.strip() == code.strip() and agent in ("ultimate", "advanced", "standard"):
                 log(f"  [{agent}] indicou que nenhuma alteração é necessária.")
