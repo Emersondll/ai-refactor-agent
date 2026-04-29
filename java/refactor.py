@@ -181,7 +181,12 @@ def _generate_and_validate(original: str, rules: str, mode: str,
 
     valid, reason = is_valid_java(original, new_code)
     if valid:
-        return new_code, ""
+        # Skill: Validador de Integridade de Nome
+        from java.validator import validate_class_name_matches_file
+        is_name_ok, name_error = validate_class_name_matches_file(new_code, file_path)
+        if is_name_ok:
+            return new_code, ""
+        reason = f"ERRO DE INTEGRIDADE: {name_error}"
 
     log(f"  Validator rejeitou: {reason} — tentando correção", "WARN")
 
@@ -207,8 +212,13 @@ def _generate_and_validate(original: str, rules: str, mode: str,
 
         valid, reason = is_valid_java(original, corrected)
         if valid:
-            log(f"  Correção {attempt}: aceita ✓", "OK")
-            return corrected, ""
+            # Skill: Validador de Integridade de Nome
+            from java.validator import validate_class_name_matches_file
+            is_name_ok, name_error = validate_class_name_matches_file(corrected, file_path)
+            if is_name_ok:
+                log(f"  Correção {attempt}: aceita ✓", "OK")
+                return corrected, ""
+            reason = f"ERRO DE INTEGRIDADE: {name_error}. O nome da classe deve ser '{file_name.replace('.java','')}'."
 
         log(f"  Correção {attempt}: ainda rejeitado — {reason}", "WARN")
         rejected_code = corrected

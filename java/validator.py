@@ -8,6 +8,7 @@ SOLUÇÕES APLICADAS:
      ao redor do erro para facilitar diagnóstico
 """
 
+import os
 import re
 import javalang
 from core.logger import log
@@ -194,3 +195,20 @@ def is_valid_java(original: str, new: str) -> tuple[bool, str]:
         return False, reason
 
     return True, ""
+def validate_class_name_matches_file(code: str, file_path: str) -> tuple[bool, str]:
+    """
+    Verifica se o código gerado contém uma classe/interface/enum 
+    que corresponde ao nome do arquivo físico.
+    """
+    file_name = os.path.basename(file_path).replace(".java", "")
+    pattern = rf'public\s+(class|interface|enum|record)\s+({file_name})\b'
+    
+    if re.search(pattern, code):
+        return True, ""
+    
+    any_public = re.search(r'public\s+(class|interface|enum|record)\s+(\w+)', code)
+    if any_public:
+        found_name = any_public.group(2)
+        return False, f"O arquivo se chama '{file_name}.java' mas você gerou a classe '{found_name}'."
+    
+    return False, f"Não foi encontrada uma classe pública '{file_name}' no código gerado."
