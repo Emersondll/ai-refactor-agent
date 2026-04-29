@@ -250,8 +250,8 @@ def _refactor_whole_file(file: str, original: str, rules: str,
         # Se o erro do Maven for "cannot find symbol" em OUTRO arquivo, 
         # significa que a refatoração local quebrou uma dependência.
         if "cannot find symbol" in build_output:
-            log("  [Impacto Detectado] Mudança de contrato detectada. Tentando sincronização global...", "PHASE")
-            _attempt_global_sync(build_output, repo_path)
+            log("  [Impacto Detectado] Mudança de contrato detectada. Tentando sincronização contextual...", "PHASE")
+            _attempt_global_sync(build_output, repo_path, rules, phase)
             # Tenta o build de novo após a sincronia
             success, build_output = maven_test(repo_path)
             if success:
@@ -491,15 +491,34 @@ def generate_tests(repo_path: str, phase: str, rules: str,
         any_changed = True
 
     return any_changed
-def _attempt_global_sync(build_output: str, repo_path: str):
+def _attempt_global_sync(build_output: str, repo_path: str, rules: str, phase: str):
     """
-    Tenta sincronizar o projeto caso uma mudança local tenha quebrado dependências.
+    Skill de Sincronia Contextual: Usa a IA para corrigir arquivos que quebraram
+    devido a mudanças em dependências, evitando ambiguidades.
     """
     error_lines = [l for l in build_output.splitlines() if "cannot find symbol" in l]
-    for line in error_lines[:5]:
-        missing_symbol, class_name = _extract_missing_symbol_and_target(line)
-        if missing_symbol and class_name:
-            log(f"  [Global Sync] Classe {class_name} reclama do símbolo {missing_symbol}")
+    
+    for line in error_lines[:3]: # Foca nos primeiros impactos
+        symbol, failing_file_rel = _extract_missing_symbol_and_target(line)
+        if not symbol or not failing_file_rel: continue
+        
+        failing_file_abs = os.path.join(repo_path, failing_file_rel)
+        if not os.path.exists(failing_file_abs): continue
+        
+        log(f"  [Global Sync] Corrigindo impacto em {failing_file_rel}...", "WARN")
+        
+        old_content = read_file(failing_file_abs)
+        sync_prompt = (
+            f"O símbolo '{symbol}' não foi encontrado em {failing_file_rel} após uma refatoração.\n"
+            f"Instrução: Analise o código e corrija as chamadas para este símbolo, "
+            f"garantindo que a lógica e os tipos originais sejam respeitados.\n\n"
+            f"Código Atual de {failing_file_rel}:\n{old_content}"
+        )
+        
+        # Chama a IA para uma "Correção de Sincronia"
+        new_content = call_ai(old_content, sync_prompt, "sync_fix", failing_file_rel, phase=phase)
+        if new_content and new_content != old_content:
+            write_file(failing_file_abs, new_content)
 
 def _extract_missing_symbol_and_target(maven_line: str) -> tuple[str | None, str | None]:
     """Extrai o nome do símbolo e da classe desfalcada do log do Maven."""
