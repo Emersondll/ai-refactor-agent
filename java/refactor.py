@@ -247,9 +247,9 @@ def _refactor_whole_file(file: str, original: str, rules: str,
         log(f"  {file_name}: Build falhou. Analisando impacto global...", "WARN")
         
         # Skill: Detecção de Impacto em Cascata
-        if "cannot find symbol" in build_output:
+        if "cannot find symbol" in build_output or "does not override" in build_output:
             log("  [Impacto Detectado] Mudança de contrato detectada. Tentando sincronização contextual...", "PHASE")
-            _attempt_global_sync(build_output, repo_path, rules, phase)
+            _attempt_global_sync(build_output, repo_path, rules, phase, new_code)
             success, build_output = maven_test(repo_path)
             if success:
                 log(f"  {file_name}: Sincronização global restaurou o build! ✓", "OK")
@@ -514,31 +514,33 @@ def generate_tests(repo_path: str, phase: str, rules: str,
         any_changed = True
 
     return any_changed
-def _attempt_global_sync(build_output: str, repo_path: str, rules: str, phase: str):
+def _attempt_global_sync(build_output: str, repo_path: str, rules: str, phase: str, trigger_file_content: str):
     """
-    Skill de Sincronia Contextual: Usa a IA para corrigir arquivos que quebraram
-    devido a mudanças em dependências, evitando ambiguidades.
+    Skill de Sincronia Contextual 2.0: Usa o código recém-refatorado como
+    referência para consertar as dependências em outros arquivos.
     """
-    error_lines = [l for l in build_output.splitlines() if "cannot find symbol" in l]
+    error_lines = [l for l in build_output.splitlines() if "cannot find symbol" in l or "does not override" in l]
     
-    for line in error_lines[:3]: # Foca nos primeiros impactos
+    for line in error_lines[:3]:
         symbol, failing_file_rel = _extract_missing_symbol_and_target(line)
-        if not symbol or not failing_file_rel: continue
+        if not failing_file_rel: continue
         
         failing_file_abs = os.path.join(repo_path, failing_file_rel)
         if not os.path.exists(failing_file_abs): continue
         
-        log(f"  [Global Sync] Corrigindo impacto em {failing_file_rel}...", "WARN")
+        log(f"  [Sincronia] Corrigindo impacto em {failing_file_rel} usando contrato atualizado...", "WARN")
         
         old_content = read_file(failing_file_abs)
         sync_prompt = (
-            f"O símbolo '{symbol}' não foi encontrado em {failing_file_rel} após uma refatoração.\n"
-            f"Instrução: Analise o código e corrija as chamadas para este símbolo, "
-            f"garantindo que a lógica e os tipos originais sejam respeitados.\n\n"
-            f"Código Atual de {failing_file_rel}:\n{old_content}"
+            f"O arquivo {failing_file_rel} quebrou após a refatoração do arquivo original.\n"
+            f"CONTRATO DE REFERÊNCIA (Código atualizado):\n{trigger_file_content}\n\n"
+            f"INSTRUÇÃO: Atualize o arquivo {failing_file_rel} para que ele seja COMPATÍVEL com o Contrato de Referência acima.\n"
+            f"- Se um método mudou, atualize a chamada ou a implementação.\n"
+            f"- NUNCA transforme Interfaces em Classes.\n"
+            f"- Mantenha a lógica original.\n\n"
+            f"CÓDIGO QUE PRECISA DE AJUSTE:\n{old_content}"
         )
         
-        # Chama a IA para uma "Correção de Sincronia"
         new_content = call_ai(old_content, sync_prompt, "sync_fix", failing_file_rel, phase=phase)
         if new_content and new_content != old_content:
             write_file(failing_file_abs, new_content)
