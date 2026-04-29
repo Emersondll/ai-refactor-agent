@@ -54,9 +54,9 @@ def main():
         log(f"Diretório '{PHASES_DIR}/' não encontrado.", "ERR")
         return
 
-    # Ordem de execução: Arquitetura/SOLID (tertiary/quaternary) -> Estrutura (fallback) -> Documentation (primary)
-    # Isso garante que o Javadoc seja a última coisa a ser feita, como solicitado.
-    phases_execution_order = ["quaternary", "tertiary", "fallback", "primary", "claude"]
+    # Ordem de Execução Semântica (Elite Workflow):
+    # SOLID -> CLEAN -> STRUCT -> DOC
+    phases_execution_order = ["solid", "clean", "struct", "doc", "claude"]
 
     for model in phases_execution_order:
         model_dir = os.path.join(PHASES_DIR, model)

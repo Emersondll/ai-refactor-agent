@@ -22,8 +22,8 @@ def test_single_file():
     reporter = PhaseReporter()
     exec_logger = ExecutionLogger(LOGS_DIR)
 
-    # Nova Ordem de Execução: SOLID/Arquitetura -> Estrutura -> Javadoc
-    phases_execution_order = ["quaternary", "tertiary", "fallback", "primary"]
+    # Ordem de Execução Semântica (Elite Workflow)
+    phases_execution_order = ["solid", "clean", "struct", "doc"]
 
     for model_tier in phases_execution_order:
         model_dir = os.path.join(PHASES_DIR, model_tier)
