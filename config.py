@@ -13,9 +13,9 @@ load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 #
 # Modelos especializados por papel (Role-Based Models):
 MODEL_DOC   = "neural-chat:7b"     # (4.1GB) -> Javadoc / Documentação
-MODEL_STRUCT = "qwen3.5:latest"    # (6.6GB) -> Estrutura / Nomenclatura
+MODEL_STRUCT = "qwen2.5-coder:7b"   # (4.7GB) -> Estrutura / Nomenclatura (Melhor para Java)
 MODEL_CLEAN  = "gemma4:latest"     # (9.6GB) -> Clean Code / Testes
-MODEL_SOLID  = "qwen2.5-coder:14b" # (9.0GB) -> SOLID / Arquitetura
+MODEL_SOLID  = "qwen2.5-coder:14b" # (9.0GB) -> SOLID / Arquitetura (O Crítico)
 
 CLAUDE_MODEL        = "claude-3-5-sonnet-20240620"
 CLAUDE_API_KEY      = os.getenv("ANTHROPIC_API_KEY")
