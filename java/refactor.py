@@ -263,8 +263,8 @@ def _refactor_whole_file(file: str, original: str, rules: str,
         raw_error_lines = [l for l in build_output.splitlines() if "[ERROR]" in l and ".java:[" in l][:5]
         
         for err_line in raw_error_lines:
-            # Tenta pegar: /caminho/Arquivo.java:[linha,coluna]
-            m = re.search(r'([^ ]+\.java):\[(\d+)', err_line)
+            # Regex melhorado para suportar espaços no caminho: /caminho/com espaço/Arquivo.java:[linha,coluna]
+            m = re.search(r'([/\\].*\.java):\[(\d+)', err_line)
             if m:
                 fpath, lnum = m.group(1), int(m.group(2))
                 try:
@@ -274,7 +274,11 @@ def _refactor_whole_file(file: str, original: str, rules: str,
                     log(f"  [Raio-X] {diag}", "ERR")
                 except: pass
 
-        error_msg = "\n".join(error_diagnostics) or "\n".join(build_output.splitlines()[:10])
+        error_summary = "\n".join(error_diagnostics) or "\n".join(build_output.splitlines()[:5])
+        
+        # Skill: Reforço de Import
+        if "cannot find symbol" in error_summary:
+            error_summary += "\nDICA: O erro 'cannot find symbol' geralmente indica um IMPORT FALTANTE ou nome de classe incorreto. Verifique o bloco de imports."
         
         corrected_code = call_ai_with_correction(
             original     = original,
@@ -283,7 +287,7 @@ def _refactor_whole_file(file: str, original: str, rules: str,
             file_name    = file_name,
             file_path    = file,
             bad_output   = new_code,
-            error_reason = f"Falha de Compilação Maven:\n{error_msg}",
+            error_reason = f"Falha de Compilação Maven:\n{error_summary}",
             phase        = phase
         )
 
