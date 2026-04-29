@@ -1,0 +1,37 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.venv/
+env/
+venv/
+ENV/
+
+# Logs and runtime data
+logs/
+*.log
+last_run.txt
+failed_files.json
+processed_repos.txt
+
+# Repositories downloaded for refactoring
+repos/
+
+# Phase reports
+phases/reports/
+report_*.json
+report_*.md
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# API Keys and Secrets
+.env
