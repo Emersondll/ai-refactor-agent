@@ -247,19 +247,17 @@ def _refactor_whole_file(file: str, original: str, rules: str,
         log(f"  {file_name}: Build falhou. Analisando impacto global...", "WARN")
         
         # Skill: Detecção de Impacto em Cascata
-        # Se o erro do Maven for "cannot find symbol" em OUTRO arquivo, 
-        # significa que a refatoração local quebrou uma dependência.
         if "cannot find symbol" in build_output:
             log("  [Impacto Detectado] Mudança de contrato detectada. Tentando sincronização contextual...", "PHASE")
             _attempt_global_sync(build_output, repo_path, rules, phase)
-            # Tenta o build de novo após a sincronia
             success, build_output = maven_test(repo_path)
             if success:
                 log(f"  {file_name}: Sincronização global restaurou o build! ✓", "OK")
 
     if not success:
         log(f"  {file_name}: Build persiste com erro. Ativando Auto-Cura local...", "WARN")
-        # ... (continua com a auto-cura local já implementada)
+        # Extrai linhas de erro para a IA
+        error_lines = [l for l in build_output.splitlines() if "[ERROR]" in l][:10]
         error_msg = "\n".join(error_lines) or "Unknown Build Error (Maven)"
         
         corrected_code = call_ai_with_correction(
