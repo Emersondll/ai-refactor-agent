@@ -19,6 +19,9 @@ processed_repos.txt
 # Repositories downloaded for refactoring
 repos/
 
+# Token-reduction cache (dep context + project dict)
+.refactor_cache/
+
 # Phase reports
 phases/reports/
 report_*.json

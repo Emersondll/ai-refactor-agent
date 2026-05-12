@@ -1,28 +1,53 @@
 """
 main.py — Localização: raiz do projeto (ai-refactor-agent/)
-
-ATUALIZADO:
-  - Exibe ao final quantos arquivos ficaram em failed_files.json
-  - Informa o comando para reprocessar os falhos com Claude
 """
 
 import os
+import subprocess
+import threading
+import time
 from config import PHASES_DIR, REPOS_DIR, LOGS_DIR
 from core.logger import log
 from core.utils import read_file
 from core.reporter import PhaseReporter
 from core.execution_logger import ExecutionLogger
-from git.repo import clone_or_update, commit_and_push
+from git_utils.repo import clone_or_update, commit_and_push
+from memory.cache import Cache
 from java.refactor import refactor_file, generate_tests, get_java_files, get_failed_tracker
+from java.compiler import get_global_coverage, maven_test_with_coverage, maven_test
+from java.flow import get_vertical_slices
+from java.sanitizer import run_sanitization
 
 
 def main():
+    os.makedirs(LOGS_DIR, exist_ok=True)
+    
     log("=" * 60, "PHASE")
-    log("AI Refactor Agent — Orquestrador Principal", "PHASE")
+    log("AI Refactor Orchestrator — Dashboard Ativo", "PHASE")
     log("=" * 60, "PHASE")
 
     reporter    = PhaseReporter()
     exec_logger = ExecutionLogger(LOGS_DIR)
+
+    # --- Iniciar Servidor do Dashboard em Background ---
+    def start_dashboard_server():
+        try:
+            # Tenta liberar a porta 8000 se estiver ocupada
+            subprocess.run(["fuser", "-k", "8000/tcp"], capture_output=True)
+            subprocess.Popen(["python3", "-m", "http.server", "8000"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            log("Dashboard Server: ATIVO em http://localhost:8000/dashboard.html", "OK")
+        except:
+            log("Não foi possível iniciar o servidor do Dashboard automaticamente.", "WARN")
+
+    def start_data_updater():
+        while True:
+            try:
+                subprocess.run(["python3", "ai/dashboard_data.py"], capture_output=True)
+            except: pass
+            time.sleep(10) # Atualiza o JSON a cada 10s
+
+    threading.Thread(target=start_dashboard_server, daemon=True).start()
+    threading.Thread(target=start_data_updater, daemon=True).start()
 
     repo = input("Repo URL ou caminho local: ").strip()
     if not repo:
@@ -54,80 +79,58 @@ def main():
         log(f"Diretório '{PHASES_DIR}/' não encontrado.", "ERR")
         return
 
-    # Ordem de Execução Semântica (Elite Workflow):
-    # SOLID -> CLEAN -> STRUCT -> DOC
-    phases_execution_order = ["solid", "clean", "struct", "doc", "claude"]
-
-    for model in phases_execution_order:
-        model_dir = os.path.join(PHASES_DIR, model)
-        if not os.path.isdir(model_dir):
-            continue
-
-        phases = sorted([f for f in os.listdir(model_dir) if f.endswith(".md")])
-        if not phases:
-            continue
-
-        log("=" * 60, "PHASE")
-        log(f"MODELO: {model.upper()}", "PHASE")
-        log("=" * 60, "PHASE")
-
-        for phase in phases:
-            phase_path = os.path.join(model_dir, phase)
-            log(f"Fase: {phase} (modelo={model})", "PHASE")
-
-            exec_logger.log_phase_start(phase, model)
-
-            rules       = read_file(phase_path)
-            any_changed = False
-
-            main_files = get_java_files(repo_path, tests=False)
-            for file in main_files:
-                if refactor_file(file, rules, repo_path, phase, reporter, exec_logger):
-                    any_changed = True
-
-            if "test" in phase.lower():
-                test_files = get_java_files(repo_path, tests=True)
-                for file in test_files:
-                    if refactor_file(file, rules, repo_path, phase, reporter, exec_logger):
-                        any_changed = True
-
-                if generate_tests(repo_path, phase, rules, reporter, exec_logger):
-                    any_changed = True
-
-            if any_changed:
-                if commit_and_push(repo_path, branch_name, phase):
-                    exec_logger.log_git_commit(phase, branch_name)
-                    log(f"Fase {phase} commitada", "OK")
-                else:
-                    log(f"Push falhou para fase {phase}", "WARN")
-            else:
-                log(f"Nenhuma mudança na fase {phase}", "WARN")
-
-    # --- Relatório final ---
-    log("=" * 60, "PHASE")
-    log("Finalizando execução", "PHASE")
-    log("=" * 60, "PHASE")
-
-    report_path = reporter.save_report()
-    log(f"Relatório: {report_path}", "OK")
-    log(f"Branch: {branch_name}", "OK")
-    log(f"Logs: {os.path.join(LOGS_DIR, 'execution.log')}", "OK")
-
-    # Solução 5 — informa sobre arquivos que precisam de reprocessamento
-    failed = get_failed_tracker(LOGS_DIR).get_pending()
-    if failed:
-        log(f"Arquivos que falharam e aguardam reprocessamento: {len(failed)}", "WARN")
-        log(f"  → Veja: {os.path.join(LOGS_DIR, 'failed_files.json')}", "WARN")
-        log(f"  → Para reprocessar com Claude: defina USE_CLAUDE_FALLBACK=true no .env", "WARN")
-        for entry in failed[:5]:  # mostra até 5
-            log(f"  {os.path.basename(entry['file'])} [{entry['phase']}]: {entry['reason']}", "WARN")
-        if len(failed) > 5:
-            log(f"  ... e mais {len(failed) - 5} arquivo(s)", "WARN")
+    # --- Health Check Inicial ---
+    log("Executando Health Check (Validação de Testes Existentes)...", "PHASE")
+    success, output = maven_test(repo_path)
+    if not success:
+        log("AVISO: O projeto já possui testes QUEBRADOS no estado inicial.", "WARN")
     else:
-        log("Nenhum arquivo pendente para reprocessamento", "OK")
+        log("Health Check: PROJETO SAUDÁVEL ✓", "OK")
 
-    log("Agente finalizado com sucesso", "OK")
+    # --- Auditoria de Cobertura Inicial ---
+    log("Iniciando Auditoria de Cobertura...", "PHASE")
+    success, _, _, _ = maven_test_with_coverage(repo_path, "")
+    global_cov = get_global_coverage(repo_path)
+    log(f"Cobertura Global de Testes: {global_cov:.2f}%", "OK" if global_cov >= 90.0 else "WARN")
+    
+    if global_cov < 90.0:
+        log(f"COBERTURA INSUFICIENTE ({global_cov:.2f}% < 90%). Ativando Geração Automática de Testes...", "WARN")
+        rules_test = "Crie testes unitários para cobrir as classes com baixa cobertura."
+        generate_tests(repo_path, "initial_coverage_fix", rules_test, reporter, exec_logger)
+        global_cov = get_global_coverage(repo_path)
 
+    # --- Cache de tokens (dep context + phase skip) ---
+    cache = Cache(repo_path)
+
+    # --- Fases de Refatoração (SOLID) ---
+    phase_paths = sorted(
+        os.path.join(root, fname)
+        for root, _, files in os.walk(PHASES_DIR)
+        for fname in files
+        if fname.endswith(".md")
+    )
+    for phase_path in phase_paths:
+        phase_file = os.path.basename(phase_path)
+        rules = read_file(phase_path)
+        log(f"Iniciando Fase: {phase_file}", "PHASE")
+        exec_logger.log_phase_start(phase_file, f"Iniciando {phase_file}")
+
+        # Pega fatias verticais ou arquivos soltos
+        files = get_java_files(repo_path)
+        for f_path in files:
+            # Refatora com segurança
+            refactor_file(f_path, rules, repo_path, phase_path, reporter, exec_logger, cache=cache)
+
+    # --- Sanitização Final ---
+    log("Iniciando Sanitização Final...", "PHASE")
+    exec_logger.log_phase_start("SANITIZATION", "Limpando imports e código morto")
+    run_sanitization(repo_path)
+
+    # --- Finalização ---
+    log("Refatoração Concluída!", "OK")
+    failed_tracker = get_failed_tracker()
+    if failed_tracker:
+        log(f"Aviso: {len(failed_tracker)} arquivos falharam. Use o reprocessador.", "WARN")
 
 if __name__ == "__main__":
     main()
