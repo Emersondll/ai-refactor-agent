@@ -130,6 +130,24 @@ def main():
     exec_logger.log_phase_start("SANITIZATION", "Limpando imports e código morto")
     run_sanitization(repo_path)
 
+    # --- Validação Final ---
+    log("Iniciando Validação Final...", "PHASE")
+    exec_logger.log_phase_start("FINAL_VALIDATION", "Validação Final pós-refatoração")
+    final_ok, _ = maven_test(repo_path)
+    if final_ok:
+        log("Validação Final: BUILD OK ✓", "OK")
+        _, _, _, _ = maven_test_with_coverage(repo_path, "")
+        final_cov = get_global_coverage(repo_path)
+        exec_logger.log_coverage(final_cov, "Cobertura Final Atingida")
+        log(f"Cobertura Final: {final_cov:.2f}%", "OK" if final_cov >= 90.0 else "WARN")
+    else:
+        log("Validação Final: BUILD QUEBRADO após refatoração!", "ERR")
+
+    # --- Persistência Final ---
+    log("Persistindo resultado final...", "PHASE")
+    exec_logger.log_phase_start("FINAL_PERSISTENCE", "Persistência Final — commit + push")
+    commit_and_push(repo_path, branch_name, "final-refactoring")
+
     # --- Finalização ---
     log("Refatoração Concluída!", "OK")
     failed_tracker = get_failed_tracker()
