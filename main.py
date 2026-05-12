@@ -90,7 +90,7 @@ def main():
 
     # --- Auditoria de Cobertura Inicial ---
     log("Iniciando Auditoria de Cobertura...", "PHASE")
-    exec_logger.log_phase_start("COVERAGE_AUDIT", "Auditoria de Cobertura Inicial")
+    exec_logger.log_phase_start("AUDIT_COVERAGE", "Auditoria de Cobertura Inicial")
     success, _, _, _ = maven_test_with_coverage(repo_path, "")
     global_cov = get_global_coverage(repo_path)
     exec_logger.log_coverage(global_cov)
@@ -145,7 +145,7 @@ def main():
 
     # --- Persistência Final ---
     log("Persistindo resultado final...", "PHASE")
-    exec_logger.log_phase_start("FINAL_PERSISTENCE", "Persistência Final — commit + push")
+    exec_logger.log_phase_start("COMMIT_PUSH", "Persistência Final — commit + push")
     commit_and_push(repo_path, branch_name, "final-refactoring")
 
     # --- Finalização ---
