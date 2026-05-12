@@ -310,7 +310,9 @@ def call_ai(code: str, rules: str, mode: str, file_name: str,
             file_path: str = "", phase: str = "",
             dep_context: str = "") -> str | None:
     """Entrada principal — gera código a partir das regras da fase."""
-    prompt = build_prompt(code, rules, mode, file_name, dep_context=dep_context)
+    from ai.compressor import maybe_compress
+    compressed_code = maybe_compress(code)
+    prompt = build_prompt(compressed_code, rules, mode, file_name, dep_context=dep_context)
     return _run_pipeline(prompt, code, file_path, file_name, mode, phase)
 
 
