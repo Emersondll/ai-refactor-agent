@@ -24,4 +24,3 @@ Apply design patterns where they reduce duplication or complexity. Make real cod
 - If the same block of code appears in more than one method,
   extract it into a private method and call it from both places.
 
-Do not change method signatures or introduce new external dependencies.

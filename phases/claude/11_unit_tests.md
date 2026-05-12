@@ -52,4 +52,3 @@ For methods with `if/else` or `switch`, write one test per branch.
 - Extract repeated values to `private static final` constants at the top
 - Do NOT connect to any database, file system, or external service
 - Do NOT test private methods directly
-- Return ONLY the complete test file — no explanations

@@ -23,4 +23,3 @@ Enforce Spring layered architecture rules. Make concrete changes.
 - If a controller receives a `@Document` or `@Entity` as `@RequestBody`,
   add `// TODO: use a request model` above the parameter.
 
-Do not change method signatures, return types, or existing test code.

@@ -73,4 +73,3 @@ class <ClassName>IT {
 - Do NOT use `@MockBean` for internal Spring beans
 - Each test must be independent and runnable in any order
 - Use `@BeforeEach` to set up and `@AfterEach` to clean data
-- Return ONLY the complete test file — no explanations

@@ -27,4 +27,3 @@ Apply Clean Code rules. You MUST make concrete code changes.
 - Replace `catch (Exception e)` with the most specific exception type known.
 - Every catch block must either log the error or rethrow — never swallow silently.
 
-Do not change method signatures, return types, or public API.

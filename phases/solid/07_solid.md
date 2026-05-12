@@ -38,4 +38,3 @@ Apply SOLID principles. You MUST make concrete code changes, not just add commen
 - Add `// TODO: split interface` where the class implements an interface
   but leaves methods empty or throwing.
 
-Do not change public API or method signatures.
