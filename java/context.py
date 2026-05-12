@@ -27,7 +27,12 @@ def get_dependency_context(file_code: str, repo_path: str,
         if cached is not None:
             return cached
 
-    context = _build_dep_context(file_code, repo_path)
+    from config import USE_RAG_CONTEXT
+    if USE_RAG_CONTEXT:
+        from java.rag_context import get_rag_context
+        context = get_rag_context(file_code, repo_path)
+    else:
+        context = _build_dep_context(file_code, repo_path)
 
     if cache is not None:
         cache.set_dep_context(sha12(file_code), context)
