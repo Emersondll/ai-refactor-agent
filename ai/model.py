@@ -13,7 +13,7 @@ import anthropic
 
 from config import (
     TIMEOUT, MAX_RETRIES,
-    MODEL_DOC, MODEL_STRUCT, MODEL_CLEAN, MODEL_SOLID,
+    MODEL_DOC, MODEL_STRUCT, MODEL_CLEAN, MODEL_SOLID, MODEL_RECOVERY,
     CLAUDE_MODEL, CLAUDE_API_KEY, USE_CLAUDE_FALLBACK,
 )
 from ai.prompt import build_prompt
@@ -24,6 +24,10 @@ from core.logger import log
 _OOM_MODELS: set[str] = set()
 _OOM_SIGNALS = ("model requires more system", "not enough memory", "out of memory", "insufficient memory", "500")
 MAX_CORRECTIONS = 1
+
+PHASES_REQUIRING_POLISH: frozenset[str] = frozenset({
+    "07_solid", "08_architecture", "09_patterns"
+})
 
 def _is_oom_error(text: str) -> bool:
     return any(sig in text.lower() for sig in _OOM_SIGNALS)
@@ -245,10 +249,16 @@ def _run_pipeline(prompt: str, code: str, file_path: str,
 
         result = _try_local_agent(agent, model_name, prompt, temperature=temp)
         if result:
-            # Skill: Meticulous Review (O Crítico)
-            # Se o refactor foi feito por um modelo menor, pede revisão para o Ultimate (SOLID)
-            if agent != "ultimate" and MODEL_SOLID and MODEL_SOLID not in _OOM_MODELS:
-                log(f"  [Skill: Crítico] Solicitando revisão técnica para {MODEL_SOLID}...")
+            # Polimento crítico: apenas em fases estruturais (SOLID/Architecture/Patterns)
+            phase_name = phase.split("/")[-1].replace(".md", "") if phase else ""
+            needs_polish = (
+                agent != "ultimate"
+                and phase_name in PHASES_REQUIRING_POLISH
+                and MODEL_SOLID
+                and MODEL_SOLID not in _OOM_MODELS
+            )
+            if needs_polish:
+                log(f"  [Crítico] Revisando com {MODEL_SOLID} (fase estrutural: {phase_name})...")
                 result = _polish_result(result, prompt, MODEL_SOLID)
             
             if result.strip() == code.strip() and agent in ("ultimate", "advanced", "standard"):
@@ -257,6 +267,11 @@ def _run_pipeline(prompt: str, code: str, file_path: str,
             return result
 
         attempts_failed += 1
+
+    if USE_CLAUDE_FALLBACK and "claude" not in agent_priority:
+        log("  [Fallback] Todos os agentes locais falharam, acionando Claude...", "WARN")
+        result = _try_claude(prompt)
+        if result: return result
 
     return None
 
@@ -292,9 +307,10 @@ def _polish_result(draft: str, original_prompt: str, critic_model: str) -> str:
 
 
 def call_ai(code: str, rules: str, mode: str, file_name: str,
-            file_path: str = "", phase: str = "") -> str | None:
+            file_path: str = "", phase: str = "",
+            dep_context: str = "") -> str | None:
     """Entrada principal — gera código a partir das regras da fase."""
-    prompt = build_prompt(code, rules, mode, file_name)
+    prompt = build_prompt(code, rules, mode, file_name, dep_context=dep_context)
     return _run_pipeline(prompt, code, file_path, file_name, mode, phase)
 
 
@@ -307,4 +323,19 @@ def call_ai_with_correction(original: str, rules: str, mode: str,
     correction_prompt = _build_validator_correction_prompt(
         base_prompt, bad_output, error_reason
     )
-    return _run_pipeline(correction_prompt, original, file_path, file_name, mode, phase)
+    
+    log("  [Autocura] Acionando Claude para correção avançada...", "INFO")
+    result = _try_claude(correction_prompt)
+    if result:
+        return result
+        
+    log(f"  [Autocura] Claude indisponível ou falhou. Acionando Médico Local (Second Opinion) com {MODEL_RECOVERY}...", "WARN")
+    
+    # Chama diretamente o modelo de recuperação (Second Opinion) com temperatura baixa
+    recovery_result = _try_local_agent("recovery", MODEL_RECOVERY, correction_prompt, temperature=0.1)
+    
+    if recovery_result:
+        return recovery_result
+        
+    log("  [Autocura] Médico Local também falhou.", "ERR")
+    return None
