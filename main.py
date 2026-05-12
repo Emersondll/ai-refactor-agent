@@ -46,13 +46,13 @@ def main():
             except: pass
             time.sleep(10) # Atualiza o JSON a cada 10s
 
-    threading.Thread(target=start_dashboard_server, daemon=True).start()
-    threading.Thread(target=start_data_updater, daemon=True).start()
-
     repo = input("Repo URL ou caminho local: ").strip()
     if not repo:
         log("Nenhum repositório informado.", "ERR")
         return
+
+    threading.Thread(target=start_dashboard_server, daemon=True).start()
+    threading.Thread(target=start_data_updater, daemon=True).start()
 
     os.makedirs(REPOS_DIR, exist_ok=True)
 
