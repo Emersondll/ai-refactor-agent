@@ -81,6 +81,7 @@ def main():
 
     # --- Health Check Inicial ---
     log("Executando Health Check (Validação de Testes Existentes)...", "PHASE")
+    exec_logger.log_phase_start("HEALTH_CHECK", "Validação de Testes Existentes")
     success, output = maven_test(repo_path)
     if not success:
         log("AVISO: O projeto já possui testes QUEBRADOS no estado inicial.", "WARN")
@@ -89,15 +90,18 @@ def main():
 
     # --- Auditoria de Cobertura Inicial ---
     log("Iniciando Auditoria de Cobertura...", "PHASE")
+    exec_logger.log_phase_start("COVERAGE_AUDIT", "Auditoria de Cobertura Inicial")
     success, _, _, _ = maven_test_with_coverage(repo_path, "")
     global_cov = get_global_coverage(repo_path)
+    exec_logger.log_coverage(global_cov)
     log(f"Cobertura Global de Testes: {global_cov:.2f}%", "OK" if global_cov >= 90.0 else "WARN")
-    
+
     if global_cov < 90.0:
         log(f"COBERTURA INSUFICIENTE ({global_cov:.2f}% < 90%). Ativando Geração Automática de Testes...", "WARN")
         rules_test = "Crie testes unitários para cobrir as classes com baixa cobertura."
         generate_tests(repo_path, "initial_coverage_fix", rules_test, reporter, exec_logger)
         global_cov = get_global_coverage(repo_path)
+        exec_logger.log_coverage(global_cov, "Cobertura Final Atingida")
 
     # --- Cache de tokens (dep context + phase skip) ---
     cache = Cache(repo_path)

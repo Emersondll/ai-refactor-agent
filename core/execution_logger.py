@@ -44,6 +44,12 @@ class ExecutionLogger:
     # Git
     # ------------------------------------------------------------------
 
+    def log_coverage(self, coverage: float, label: str = "Cobertura Global Atual") -> None:
+        self._write(
+            event="COVERAGE", status="OK" if coverage >= 90.0 else "WARN",
+            message=f"{label}: {coverage:.2f}%",
+        )
+
     def log_git_branch_created(self, branch: str) -> None:
         self._write(
             event="GIT_BRANCH_CREATED", status="OK",
