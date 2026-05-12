@@ -18,7 +18,7 @@ from core.reporter import PhaseReporter
 from core.execution_logger import ExecutionLogger
 from ai.model import call_ai, call_ai_with_correction
 from java.validator import is_valid_java
-from java.compiler import maven_test
+from java.compiler import maven_test, maven_test_with_coverage
 from java.scope_reducer import (
     is_large_file,
     extract_class_header,
@@ -39,10 +39,8 @@ _SKIP_PATTERNS = [
      "Interface JPA pura (generics complexos)"),
     (re.compile(r'@SpringBootApplication'),
      "Classe main Spring Boot"),
-    (re.compile(r'@Document\b'),
-     "MongoDB @Document — construtor usado em outros arquivos"),
-    (re.compile(r'@Entity\b'),
-     "JPA @Entity — construtor usado em outros arquivos"),
+    (re.compile(r'public\s+interface\b'),
+     "Interface pura (sem lógica)"),
     (re.compile(r'(?m)^\s*[A-Z][A-Z_0-9]+\s*\([^)]+\)\s*[,;]'),
      "Enum com construtor parametrizado"),
 ]
@@ -146,35 +144,46 @@ def _test_path_for(main_file: str, repo_path: str) -> str | None:
 # Ciclo de geração + validação com correção
 # ---------------------------------------------------------------------------
 
-from java.context import get_dependency_context
-
 def _generate_and_validate(original: str, rules: str, mode: str,
-                             file_name: str, file_path: str, phase: str = "") -> tuple[str | None, str]:
+                             file_name: str, file_path: str,
+                             phase: str = "",
+                             cache=None) -> tuple[str | None, str]:
     """
     Chama a IA e valida o resultado com injeção de contexto de dependências.
+    dep_context é obtido do cache ou gerado, e passado separado para build_prompt.
     """
-    # Skill: Contexto de Dependências do Repositório
-    repo_path = os.path.dirname(os.path.dirname(file_path)) # Tentativa de achar o repo root
-    # Na verdade, o repo_path é passado para refactor_file. 
-    # Vou ajustar para que _generate_and_validate o receba ou use o original.
-    
-    # Para este teste, vamos assumir que o repo_path pode ser derivado ou passado.
-    # Vou buscar o repo_path real no escopo superior.
-    
+    from java.context import get_dependency_context
+
     dep_context = ""
+    root = file_path
     try:
-        # Busca no diretório pai até achar o root do repo (onde tem .git ou pom.xml)
-        root = file_path
         while root != "/" and not os.path.exists(os.path.join(root, "pom.xml")):
             root = os.path.dirname(root)
         if os.path.exists(os.path.join(root, "pom.xml")):
-            dep_context = get_dependency_context(original, root)
-    except: pass
+            dep_context = get_dependency_context(original, root, cache=cache)
+    except Exception:
+        pass
 
-    enriched_rules = rules + "\n" + dep_context
+    test_context = ""
+    try:
+        test_file = _test_path_for(file_path, root)
+        if test_file and os.path.exists(test_file):
+            from core.utils import read_file as _read
+            test_code = _read(test_file)
+            test_context = (
+                "\n\n[CONTEXTO DE TESTE] O teste abaixo valida esta classe. "
+                "Sua refatoração DEVE garantir que ele continue passando:\n\n"
+                f"```java\n{test_code}\n```"
+            )
+            log("  [Contexto] Teste unitário injetado.", "OK")
+    except Exception:
+        pass
 
-    # Primeira tentativa normal
-    new_code = call_ai(original, enriched_rules, mode, file_name, file_path=file_path, phase=phase)
+    phase_delta = rules + test_context
+
+    new_code = call_ai(original, phase_delta, mode, file_name,
+                       file_path=file_path, phase=phase,
+                       dep_context=dep_context)
 
     if not new_code:
         return None, "IA não gerou código"
@@ -197,7 +206,7 @@ def _generate_and_validate(original: str, rules: str, mode: str,
 
         corrected = call_ai_with_correction(
             original      = original,
-            rules         = rules,
+            rules         = phase_delta,
             mode          = mode,
             file_name     = file_name,
             file_path     = file_path,
@@ -233,11 +242,14 @@ def _generate_and_validate(original: str, rules: str, mode: str,
 def _refactor_whole_file(file: str, original: str, rules: str,
                           repo_path: str, phase: str,
                           reporter: PhaseReporter,
-                          exec_logger: ExecutionLogger | None) -> bool:
+                          exec_logger: ExecutionLogger | None,
+                          cache=None) -> bool:
     file_name = os.path.basename(file)
     mode      = _mode_for(file)
 
-    new_code, reason = _generate_and_validate(original, rules, mode, file_name, file, phase=phase)
+    new_code, reason = _generate_and_validate(
+        original, rules, mode, file_name, file, phase=phase, cache=cache
+    )
 
     if not new_code:
         log(f"  {file_name}: falhou — {reason}", "WARN")
@@ -267,8 +279,23 @@ def _refactor_whole_file(file: str, original: str, rules: str,
     if not success:
         log(f"  {file_name}: Build persiste com erro. Ativando Diagnóstico de Precisão...", "WARN")
         
-        # Skill: Raio-X de Erros
-        # Extrai os snippets reais do código que causaram a falha
+        # Skill: Identificação de Culpado Transversal
+        # Se o erro for em OUTRO arquivo (ex: interface que sumiu), tentamos restaurar/corrigir o outro arquivo.
+        culprit_match = re.search(r'([/\\].*\.java):\[\d+', build_output)
+        if culprit_match:
+            culprit_path = culprit_match.group(1)
+            culprit_name = os.path.basename(culprit_path)
+            if culprit_name != file_name:
+                log(f"  [Auto-Cura] O culpado parece ser {culprit_name}. Tentando reparo de emergência...", "PHASE")
+                # Se o erro for "does not contain class" ou "should be declared in file", é erro estrutural
+                if "should be declared in a file" in build_output or "does not contain class" in build_output:
+                    # Tenta restaurar o arquivo da interface/culpado para o estado estável
+                    run_command(f"git checkout -- \"{culprit_path}\"", repo_path)
+                    log(f"  [Auto-Cura] {culprit_name} restaurado para estado estável do Git.", "OK")
+                    success, build_output = maven_test(repo_path)
+                    if success: return True # Resolvido restaurando o culpado
+        
+        # Skill: Raio-X de Erros (Continua para o arquivo atual)
         error_diagnostics = []
         raw_error_lines = [l for l in build_output.splitlines() if "[ERROR]" in l and ".java:[" in l][:5]
         
@@ -292,7 +319,13 @@ def _refactor_whole_file(file: str, original: str, rules: str,
         # Skill: Reforço de Import com Dicionário Global
         if "cannot find symbol" in error_summary:
             from java.dictionary import build_project_dictionary
-            proj_map = build_project_dictionary(repo_path)
+            proj_map = None
+            if cache is not None:
+                proj_map = cache.get_project_dict()
+            if proj_map is None:
+                proj_map = build_project_dictionary(repo_path)
+                if cache is not None:
+                    cache.set_project_dict(proj_map)
             error_summary += f"\n\n{proj_map}\n\nDICA: Use o mapa acima para adicionar o IMPORT correto."
         
         corrected_code = call_ai_with_correction(
@@ -337,7 +370,8 @@ def _refactor_whole_file(file: str, original: str, rules: str,
 def _refactor_by_method(file: str, original: str, rules: str,
                          repo_path: str, phase: str,
                          reporter: PhaseReporter,
-                         exec_logger: ExecutionLogger | None) -> bool:
+                         exec_logger: ExecutionLogger | None,
+                         cache=None) -> bool:
     file_name = os.path.basename(file)
     mode      = _mode_for(file)
 
@@ -347,7 +381,7 @@ def _refactor_by_method(file: str, original: str, rules: str,
     if not methods:
         log(f"  {file_name}: nenhum método extraível — tentando arquivo inteiro")
         return _refactor_whole_file(file, original, rules, repo_path, phase,
-                                    reporter, exec_logger)
+                                    reporter, exec_logger, cache=cache)
 
     log(f"  {file_name}: {len(methods)} métodos a processar")
 
@@ -360,7 +394,6 @@ def _refactor_by_method(file: str, original: str, rules: str,
 
         context = build_method_context(header, method)
 
-        # Usa o mesmo ciclo de correção para métodos individuais
         ai_response, reason = _generate_and_validate(
             original  = context,
             rules     = rules,
@@ -368,6 +401,7 @@ def _refactor_by_method(file: str, original: str, rules: str,
             file_name = file_name,
             file_path = file,
             phase     = phase,
+            cache     = cache,
         )
 
         if not ai_response:
@@ -431,8 +465,17 @@ def _refactor_by_method(file: str, original: str, rules: str,
 
 def refactor_file(file: str, rules: str, repo_path: str,
                   phase: str, reporter: PhaseReporter,
-                  exec_logger: ExecutionLogger | None = None) -> bool:
+                  exec_logger: ExecutionLogger | None = None,
+                  cache=None) -> bool:
     file_name = os.path.basename(file)
+
+    # Phase skip: se já processamos este arquivo nesta fase neste run, pula
+    if cache is not None:
+        phase_name = phase.split("/")[-1].replace(".md", "")
+        if cache.is_phase_done(file, phase_name):
+            log(f"  {file_name}: cache hit — {phase_name} já aplicada neste run", "OK")
+            reporter.record_skipped(phase, file_name, f"cache: {phase_name} já aplicada")
+            return False
 
     log(f"Processando [{_mode_for(file)}]: {file_name}")
 
@@ -451,11 +494,17 @@ def refactor_file(file: str, rules: str, repo_path: str,
 
     if is_large_file(original, LARGE_FILE_THRESHOLD):
         log(f"  {file_name}: arquivo grande → processamento por método")
-        return _refactor_by_method(file, original, rules, repo_path, phase,
-                                   reporter, exec_logger)
+        success = _refactor_by_method(file, original, rules, repo_path, phase,
+                                      reporter, exec_logger, cache=cache)
     else:
-        return _refactor_whole_file(file, original, rules, repo_path, phase,
-                                    reporter, exec_logger)
+        success = _refactor_whole_file(file, original, rules, repo_path, phase,
+                                       reporter, exec_logger, cache=cache)
+
+    if success and cache is not None:
+        phase_name = phase.split("/")[-1].replace(".md", "")
+        cache.mark_phase_done(file, phase_name)
+
+    return success
 
 
 # ---------------------------------------------------------------------------
@@ -507,11 +556,39 @@ def generate_tests(repo_path: str, phase: str, rules: str,
         os.makedirs(os.path.dirname(test_path), exist_ok=True)
         write_file(test_path, test_code)
 
-        success, _ = maven_test(repo_path)
-        if not success:
+        success, combined_out, coverage, missed_lines = maven_test_with_coverage(repo_path, file_name)
+        
+        # Skill: Enforcement de Cobertura JaCoCo + Autocura Sistêmica
+        for attempt in range(MAX_VALIDATOR_RETRIES):
+            if success and coverage >= 90.0:
+                log(f"  [{test_name}] Cobertura atingida: {coverage:.2f}% ✓", "OK")
+                break
+                
+            if not success:
+                log(f"  [{test_name}] Teste falhou (compilação ou lógica). Iniciando Autocura...", "WARN")
+                error_msg = f"O teste que você gerou FALHOU.\n\nERRO DO MAVEN:\n{combined_out[-2000:]}\n\nAnalise o erro acima e corrija o teste. Se for um erro de asserção (ex: 200 vs 202), ajuste o teste para o valor real que o código retorna."
+            else:
+                log(f"  [{test_name}] Cobertura baixa: {coverage:.2f}%. Expandindo testes...", "WARN")
+                error_msg = f"Seus testes passaram, mas a cobertura está em {coverage:.2f}%. O mínimo exigido é 90.0%.\nEscreva novos métodos de teste para cobrir as linhas: {missed_lines}."
+            
+            corrected_test = call_ai_with_correction(
+                original=original, rules=rules, mode="test",
+                file_name=file_name, file_path=test_path,
+                bad_output=test_code, error_reason=error_msg, phase=phase
+            )
+            
+            if not corrected_test:
+                break
+                
+            write_file(test_path, corrected_test)
+            test_code = corrected_test
+            success, combined_out, coverage, missed_lines = maven_test_with_coverage(repo_path, file_name)
+
+        if not success or coverage < 90.0:
             os.remove(test_path)
-            log(f"  {test_name}: mvn falhou, removido", "WARN")
-            get_failed_tracker().record(test_path, phase, "mvn falhou")
+            err_reason = "mvn falhou" if not success else f"cobertura insuficiente ({coverage:.2f}%)"
+            log(f"  {test_name}: {err_reason}, removido", "WARN")
+            get_failed_tracker().record(test_path, phase, err_reason)
             if exec_logger:
                 exec_logger.log_file_reverted(phase, test_name)
             reporter.record_build_failed(phase, test_name)
@@ -532,13 +609,14 @@ def _attempt_global_sync(build_output: str, repo_path: str, rules: str, phase: s
     error_lines = [l for l in build_output.splitlines() if "cannot find symbol" in l or "does not override" in l]
     
     for line in error_lines[:3]:
-        symbol, failing_file_rel = _extract_missing_symbol_and_target(line)
-        if not failing_file_rel: continue
+        symbol, failing_file_abs = _extract_missing_symbol_and_target(line)
+        if not failing_file_abs: continue
         
-        failing_file_abs = os.path.join(repo_path, failing_file_rel)
         if not os.path.exists(failing_file_abs): continue
         
-        log(f"  [Sincronia] Corrigindo impacto em {failing_file_rel} usando contrato atualizado...", "WARN")
+        failing_file_name = os.path.basename(failing_file_abs)
+        failing_file_rel = os.path.relpath(failing_file_abs, repo_path)
+        log(f"  [Sincronia] Corrigindo impacto em {failing_file_name} usando contrato atualizado...", "WARN")
         
         old_content = read_file(failing_file_abs)
         sync_prompt = (
@@ -556,16 +634,17 @@ def _attempt_global_sync(build_output: str, repo_path: str, rules: str, phase: s
             write_file(failing_file_abs, new_content)
 
 def _extract_missing_symbol_and_target(maven_line: str) -> tuple[str | None, str | None]:
-    """Extrai o nome do símbolo e da classe desfalcada do log do Maven."""
-    m = re.search(r'/([^/]+\.java):', maven_line)
-    class_name = m.group(1) if m else None
+    """Extrai o nome do símbolo e o caminho absoluto da classe desfalcada do log do Maven."""
+    # O maven_line geralmente vem no formato: [ERROR] /caminho/completo/Arquivo.java:[linha,coluna] erro...
+    m = re.search(r'(/.*?\.java):', maven_line)
+    file_path = m.group(1) if m else None
     
     symbol = None
     if "method" in maven_line:
         m_sym = re.search(r'method (\w+)\(', maven_line)
         symbol = m_sym.group(1) if m_sym else None
         
-    return symbol, class_name
+    return symbol, file_path
 
 def _get_line_from_file(file_path: str, line_number: int) -> str:
     """Retorna uma linha específica de um arquivo."""
