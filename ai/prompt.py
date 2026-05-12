@@ -1,77 +1,77 @@
 """
-prompt.py — Localização: ai/prompt.py
+prompt.py — ai/prompt.py
 
-CORRIGIDO:
-  - Import instruction: antes dizia "PRESERVE existing imports" sem exceção.
-    O modelo adicionava tipos como Optional<X> no código mas não adicionava
-    o import, quebrando o build com "cannot find symbol: class Optional".
-  - Agora: preserva imports existentes E adiciona imports obrigatórios para
-    qualquer tipo novo introduzido pelo refactoring.
+BASE_CONSTRAINTS: constante global com regras técnicas e formato de output.
+  Enviada em toda chamada — não modifique para não quebrar o output format.
+
+build_prompt(): compõe BASE_CONSTRAINTS + phase delta + dep_context separado.
+  dep_context é colocado em sua própria seção para ser facilmente identificável.
 """
 
 
-def build_prompt(code: str, rules: str, mode: str, file_name: str) -> str:
-    """
-    Prompt GENÉRICO — sem conflitos com as fases.
+BASE_CONSTRAINTS = """\
+You are a senior Java engineer.
 
-    As FASES definem O QUE fazer (via `rules`).
-    O PROMPT define COMO fazer (formato técnico).
-    """
+### TECHNICAL CONSTRAINTS (MANDATORY)
+PRESERVE the package declaration exactly as-is.
+PRESERVE all existing import statements.
+ADD import statements for any NEW type you introduce in the code.
+  Check the dependency section below for '// SUGGESTED IMPORT' hints.
+PRESERVE method signatures (name, parameters, return type).
+PRESERVE class-level annotations.
+DO NOT create new classes — work within the existing file only.
+DO NOT introduce external dependencies not already in the project.
+DO NOT modify Spring Boot main class structure.
+DO NOT change public API or method signatures.
+DO NOT modify existing test code.
 
+### OUTPUT FORMAT (MANDATORY)
+Return ONLY the complete Java source file.
+Return exactly ONE java code block (triple-backtick java).
+NO explanations, NO markdown outside the code block.
+NO ANSI or invisible characters.\
+"""
+
+
+def _build_task(mode: str, file_name: str) -> str:
     if mode == "test":
-        task = (
-            f"Write comprehensive JUnit 5 + Mockito unit tests for {file_name}.\n"
-            "Include happy path, edge cases, and exception scenarios."
+        return (
+            f"Escreva testes unitários abrangentes com JUnit 5 + Mockito para a classe '{file_name}'.\n"
+            "DIRETRIZES TÉCNICAS:\n"
+            "1. PACOTE: Use exatamente o mesmo pacote da classe original.\n"
+            "2. IMPORTS: Importe explicitamente Mockito (@Mock, @InjectMocks, Mockito.when), "
+            "JUnit 5 (@Test, @BeforeEach, Assertions) e TODAS as dependências.\n"
+            "3. MOCKS: Use @InjectMocks na classe sendo testada e @Mock em suas dependências.\n"
+            "4. INTEGRIDADE: Verifique as assinaturas da classe original. "
+            "Não chame métodos inexistentes.\n"
+            "5. COBERTURA: Inclua 'happy path', casos de borda e cenários de erro/exceção.\n"
+            "6. JAVA RECORDS: Se encontrar 'record', use o construtor canônico (com todos os argumentos).\n"
+            "7. FIDELIDADE: Teste apenas o que o código faz atualmente."
         )
-    else:
-        task = (
-            f"Refactor {file_name} applying the rules below.\n"
-            "Preserve existing behavior. Apply only the rules relevant to this file."
-        )
-
     return (
-        "You are a senior Java engineer.\n\n"
-
-        "### RULES FROM PHASE\n"
-        f"{rules.strip()}\n\n"
-
-        "### TASK\n"
-        f"{task}\n\n"
-
-        "### TECHNICAL CONSTRAINTS (MANDATORY)\n"
-        "PRESERVE the package declaration exactly as-is.\n"
-        "PRESERVE all existing import statements.\n"
-        "ADD import statements for any NEW type you introduce in the code.\n"
-        "  Example: if you use Optional<X>, add 'import java.util.Optional;'\n"
-        "  Example: if you use List<X>, add 'import java.util.List;'\n"
-        "PRESERVE method signatures (name, parameters, return type).\n"
-        "PRESERVE class-level annotations.\n"
-        "DO NOT introduce external dependencies not already in the project.\n"
-        "DO NOT modify Spring Boot main class structure.\n\n"
-
-        "### OUTPUT FORMAT (MANDATORY)\n"
-        "Return ONLY the complete Java source file.\n"
-        "Return exactly ONE code block in ```java format.\n"
-        "NO explanations, comments outside code, or multiple blocks.\n"
-        "NO markdown before or after the code block.\n"
-        "NO ANSI or invisible characters.\n\n"
-
-        "### EXAMPLE OUTPUT FORMAT\n"
-        "```java\n"
-        "package com.example;\n"
-        "\n"
-        "import java.util.List;\n"
-        "import java.util.Optional;\n"
-        "\n"
-        "public class Example {\n"
-        "    public Optional<String> getItem(String id) {\n"
-        "        return Optional.ofNullable(id);\n"
-        "    }\n"
-        "}\n"
-        "```\n\n"
-
-        "### SOURCE FILE TO PROCESS\n"
-        "```java\n"
-        f"{code}\n"
-        "```"
+        f"Refactor {file_name} applying the rules below.\n"
+        "Preserve existing behavior. Apply only the rules relevant to this file."
     )
+
+
+def build_prompt(code: str, phase_delta: str, mode: str, file_name: str,
+                 dep_context: str = "") -> str:
+    """
+    Monta o prompt completo para o modelo.
+
+    Args:
+        code: Código Java do arquivo a processar.
+        phase_delta: Regras específicas da fase (apenas o que é exclusivo).
+        mode: 'refactor' ou 'test'.
+        file_name: Nome do arquivo Java (ex: CustomerService.java).
+        dep_context: Contexto de dependências compacto (opcional).
+    """
+    parts = [
+        BASE_CONSTRAINTS,
+        f"\n### PHASE RULES\n{phase_delta.strip()}",
+        f"\n### TASK\n{_build_task(mode, file_name)}",
+    ]
+    if dep_context and dep_context.strip():
+        parts.append(f"\n### DEPENDENCY CONTEXT\n{dep_context.strip()}")
+    parts.append(f"\n### SOURCE FILE TO PROCESS\n```java\n{code}\n```")
+    return "\n".join(parts)
