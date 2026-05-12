@@ -22,6 +22,10 @@ repos/
 # Token-reduction cache (dep context + project dict)
 .refactor_cache/
 
+# RAG and semantic memory vector stores
+.rag_store/
+.mem0_store/
+
 # Phase reports
 phases/reports/
 report_*.json
