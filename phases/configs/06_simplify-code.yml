@@ -1,0 +1,14 @@
+skill: simplify-code
+description: Simplifica expressões booleanas e remove parênteses desnecessários
+tool: openrewrite
+artifact_coordinates:
+  - org.openrewrite.recipe:rewrite-static-analysis:RELEASE
+recipes:
+  - org.openrewrite.staticanalysis.SimplifyBooleanExpression
+  - org.openrewrite.staticanalysis.SimplifyBooleanReturn
+  - org.openrewrite.staticanalysis.UnnecessaryParentheses
+review_criteria: |
+  O diff deve APENAS simplificar expressões booleanas redundantes (ex: x == true → x),
+  simplificar retornos booleanos (ex: if (x) return true; else return false; → return x;)
+  e remover parênteses supérfluos.
+  REJEITE se: lógica ou resultado de qualquer expressão for alterado.

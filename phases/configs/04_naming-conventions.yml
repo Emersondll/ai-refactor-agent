@@ -1,0 +1,12 @@
+skill: naming-conventions
+description: Renomeia identificadores para seguir convenções Java (camelCase/PascalCase)
+tool: openrewrite
+artifact_coordinates:
+  - org.openrewrite.recipe:rewrite-static-analysis:RELEASE
+recipes:
+  - org.openrewrite.staticanalysis.MethodNameCasing
+  - org.openrewrite.staticanalysis.LocalVariableNameCasing
+review_criteria: |
+  O diff deve APENAS renomear métodos ou variáveis que violam convenções Java.
+  Nomes de campos e tipos não devem ser alterados por esta skill.
+  REJEITE se: lógica alterada, ou qualquer rename que possa quebrar API pública.

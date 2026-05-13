@@ -1,0 +1,11 @@
+skill: clean-imports
+description: Remove imports não utilizados e ordena imports alfabeticamente
+tool: openrewrite
+artifact_coordinates: []
+recipes:
+  - org.openrewrite.java.RemoveUnusedImports
+  - org.openrewrite.java.OrderImports
+review_criteria: |
+  O diff deve APENAS remover linhas de import não utilizadas e reordenar imports.
+  REJEITE se: qualquer linha de código Java além de imports foi alterada,
+  ou se imports necessários foram removidos.

@@ -1,0 +1,15 @@
+skill: modernize-syntax
+description: Moderniza sintaxe para padrões Java 17+ (diamond operator, String.isEmpty, etc.)
+tool: openrewrite
+artifact_coordinates:
+  - org.openrewrite.recipe:rewrite-static-analysis:RELEASE
+recipes:
+  - org.openrewrite.staticanalysis.UseDiamondOperator
+  - org.openrewrite.staticanalysis.UseStringIsEmpty
+  - org.openrewrite.staticanalysis.NoDoubleBraceInitialization
+review_criteria: |
+  O diff deve APENAS substituir sintaxe verbosa por equivalentes modernos:
+  - new ArrayList<String>() → new ArrayList<>()
+  - str.length() == 0 → str.isEmpty()
+  - Remover double brace initialization
+  REJEITE se: qualquer comportamento em runtime puder ser alterado.
