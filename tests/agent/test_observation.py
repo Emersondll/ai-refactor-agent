@@ -52,7 +52,7 @@ def test_observation_build_red_when_passed(tmp_path):
 def test_observation_phases_applied_from_cache(tmp_path):
     java_file = tmp_path / "Foo.java"
     java_file.write_text("public class Foo {}")
-    cache = _make_cache({(str(java_file), "solid"): True})
+    cache = _make_cache({(str(java_file), "final-keywords"): True})
     with patch("agent.observation.get_failed_tracker") as mock_ft:
         mock_ft.return_value._entries = []
         mock_ft.return_value.get_build_failure_count.return_value = 0
@@ -61,5 +61,5 @@ def test_observation_phases_applied_from_cache(tmp_path):
             obs = build_observation(str(tmp_path), cache, cycle=1, max_cycles=20)
 
     assert len(obs["files"]) == 1
-    assert "solid" in obs["files"][0]["phases_applied"]
-    assert "solid" not in obs["files"][0]["phases_pending"]
+    assert "final-keywords" in obs["files"][0]["phases_applied"]
+    assert "final-keywords" not in obs["files"][0]["phases_pending"]
