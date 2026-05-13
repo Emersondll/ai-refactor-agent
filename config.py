@@ -17,7 +17,7 @@ MODEL_STRUCT = "qwen2.5-coder:7b"   # (4.7GB) -> Estrutura / Nomenclatura (Melho
 MODEL_CLEAN  = "gemma4:latest"     # (9.6GB) -> Clean Code / Testes
 MODEL_SOLID  = "qwen2.5-coder:14b" # (9.0GB) -> SOLID / Arquitetura (O Crítico)
 MODEL_RECOVERY = "gemma4:latest"   # -> Autocura Local Especializada (Second Opinion)
-CLAUDE_MODEL        = "claude-3-5-sonnet-20240620"
+CLAUDE_MODEL        = "claude-sonnet-4-6"
 CLAUDE_API_KEY      = os.getenv("ANTHROPIC_API_KEY")
 USE_CLAUDE_FALLBACK = os.getenv("USE_CLAUDE_FALLBACK", "true").lower() == "true"
 FLOW_MODE           = os.getenv("FLOW_MODE", "false").lower() == "true"
@@ -39,8 +39,9 @@ OLLAMA_BASE_URL    = os.getenv("OLLAMA_BASE_URL",    "http://localhost:11434")
 # ---------------------------------------------------------------------------
 # Agent Loop (disabled by default — enable via .env)
 # ---------------------------------------------------------------------------
-USE_AGENT_MODE   = os.getenv("USE_AGENT_MODE",   "false").lower() == "true"
-AGENT_MAX_CYCLES = int(os.getenv("AGENT_MAX_CYCLES", "20"))
+USE_AGENT_MODE    = os.getenv("USE_AGENT_MODE",    "false").lower() == "true"
+AGENT_MAX_CYCLES  = int(os.getenv("AGENT_MAX_CYCLES", "20"))
+USE_LOCAL_PLANNER = os.getenv("USE_LOCAL_PLANNER", "false").lower() == "true"
 
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
 PHASES_DIR = os.path.join(BASE_DIR, "phases")
