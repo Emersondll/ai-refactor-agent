@@ -175,9 +175,6 @@ def is_valid_java(original: str, new: str) -> tuple[bool, str]:
     if '\x1b' in new or '\u001b' in new:
         return False, "ANSI detectado"
 
-    if new.strip() == original.strip():
-        return False, "Código idêntico ao original"
-
     if not _JAVA_DECL.search(new):
         return False, "Sem declaração Java reconhecível"
 
@@ -195,20 +192,47 @@ def is_valid_java(original: str, new: str) -> tuple[bool, str]:
         return False, reason
 
     return True, ""
+def validate_package_matches_path(code: str, file_path: str) -> tuple[bool, str]:
+    """
+    Verifica se o package declarado corresponde ao caminho real do arquivo.
+    Impede alucinações de package como 'com.example' em vez de 'com.caju.transactionauthorizer.document'.
+    """
+    pkg_match = re.search(r'^package\s+([\w.]+)\s*;', code, re.MULTILINE)
+    if not pkg_match:
+        return True, ""
+
+    declared_pkg = pkg_match.group(1)
+    norm = file_path.replace("\\", "/")
+
+    for marker in ("/src/main/java/", "/src/test/java/"):
+        if marker in norm:
+            after_java = norm.split(marker)[-1]
+            dir_part = "/".join(after_java.split("/")[:-1])
+            expected_pkg = dir_part.replace("/", ".")
+            if expected_pkg and declared_pkg != expected_pkg:
+                return False, (
+                    f"Package '{declared_pkg}' não corresponde ao caminho do arquivo "
+                    f"(esperado: '{expected_pkg}')"
+                )
+            return True, ""
+
+    return True, ""
+
+
 def validate_class_name_matches_file(code: str, file_path: str) -> tuple[bool, str]:
     """
     Verifica se o código gerado contém uma classe/interface/enum 
     que corresponde ao nome do arquivo físico.
     """
     file_name = os.path.basename(file_path).replace(".java", "")
-    pattern = rf'public\s+(class|interface|enum|record)\s+({file_name})\b'
+    pattern = rf'(?:public\s+)?(class|interface|enum|record)\s+({file_name})\b'
     
     if re.search(pattern, code):
         return True, ""
     
-    any_public = re.search(r'public\s+(class|interface|enum|record)\s+(\w+)', code)
-    if any_public:
-        found_name = any_public.group(2)
+    any_class = re.search(r'(?:public\s+)?(class|interface|enum|record)\s+(\w+)', code)
+    if any_class:
+        found_name = any_class.group(2)
         return False, f"O arquivo se chama '{file_name}.java' mas você gerou a classe '{found_name}'."
     
-    return False, f"Não foi encontrada uma classe pública '{file_name}' no código gerado."
+    return False, f"Não foi encontrada a classe '{file_name}' no código gerado."

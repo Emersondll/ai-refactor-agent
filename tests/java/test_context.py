@@ -73,7 +73,8 @@ def test_dep_context_cache_miss_calls_build_and_stores(tmp_path):
     file_code = "package com.ex;\npublic class B {}"
     file_hash = sha12(file_code)
 
-    with patch("java.context._build_dep_context", return_value="// BUILT") as mock_build:
+    with patch("config.USE_RAG_CONTEXT", False), \
+         patch("java.context._build_dep_context", return_value="// BUILT") as mock_build:
         result = get_dependency_context(file_code, "/any/repo", cache=cache)
         mock_build.assert_called_once()
 
@@ -83,7 +84,8 @@ def test_dep_context_cache_miss_calls_build_and_stores(tmp_path):
 def test_dep_context_no_cache_calls_build_directly(tmp_path):
     from java.context import get_dependency_context
 
-    with patch("java.context._build_dep_context", return_value="// NO CACHE") as mock_build:
+    with patch("config.USE_RAG_CONTEXT", False), \
+         patch("java.context._build_dep_context", return_value="// NO CACHE") as mock_build:
         result = get_dependency_context("public class C {}", "/any/repo", cache=None)
         mock_build.assert_called_once()
     assert result == "// NO CACHE"

@@ -50,6 +50,15 @@ class ExecutionLogger:
             message=f"{label}: {coverage:.2f}%",
         )
 
+    def log_files_total(self, count: int) -> None:
+        self._write(event="FILES_TOTAL", status="INFO",
+                    message=f"Total de arquivos a processar: {count}", count=count)
+
+    def log_files_queue(self, files: list) -> None:
+        """Loga a fila completa de arquivos para o dashboard pré-popular o honeycomb."""
+        self._write(event="FILES_QUEUE", status="INFO",
+                    message=f"Fila: {len(files)} arquivos", files=files)
+
     def log_git_branch_created(self, branch: str) -> None:
         self._write(
             event="GIT_BRANCH_CREATED", status="OK",

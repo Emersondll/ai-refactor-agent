@@ -13,6 +13,7 @@ from core.reporter import PhaseReporter
 from core.execution_logger import ExecutionLogger
 from git_utils.repo import clone_or_update, commit_and_push
 from memory.cache import Cache
+from memory.semantic_memory import SemanticMemory
 from java.refactor import refactor_file, generate_tests, get_java_files, get_failed_tracker
 from java.compiler import get_global_coverage, maven_test_with_coverage, maven_test
 from java.flow import get_vertical_slices
@@ -104,7 +105,8 @@ def main():
         exec_logger.log_coverage(global_cov, "Cobertura Final Atingida")
 
     # --- Cache de tokens (dep context + phase skip) ---
-    cache = Cache(repo_path)
+    cache        = Cache(repo_path)
+    semantic_mem = SemanticMemory()
 
     # --- Fases de Refatoração (SOLID) ---
     phase_paths = sorted(
@@ -113,6 +115,10 @@ def main():
         for fname in files
         if fname.endswith(".md")
     )
+    _all_java_files = get_java_files(repo_path)
+    exec_logger.log_files_total(len(_all_java_files))
+    exec_logger.log_files_queue([os.path.basename(f) for f in _all_java_files])
+
     for phase_path in phase_paths:
         phase_file = os.path.basename(phase_path)
         rules = read_file(phase_path)
@@ -123,7 +129,8 @@ def main():
         files = get_java_files(repo_path)
         for f_path in files:
             # Refatora com segurança
-            refactor_file(f_path, rules, repo_path, phase_path, reporter, exec_logger, cache=cache)
+            refactor_file(f_path, rules, repo_path, phase_path, reporter, exec_logger,
+                          cache=cache, semantic_mem=semantic_mem)
 
     # --- Sanitização Final ---
     log("Iniciando Sanitização Final...", "PHASE")

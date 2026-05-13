@@ -13,11 +13,12 @@ import json
 from datetime import datetime
 
 from core.logger import log
+from core.live_state import update as _live
 from core.utils import read_file, write_file
 from core.reporter import PhaseReporter
 from core.execution_logger import ExecutionLogger
 from ai.model import call_ai, call_ai_with_correction
-from java.validator import is_valid_java
+from java.validator import is_valid_java, validate_package_matches_path
 from java.compiler import maven_test, maven_test_with_coverage
 from java.scope_reducer import (
     is_large_file,
@@ -32,6 +33,9 @@ from java.scope_reducer import (
 LARGE_FILE_THRESHOLD  = 100
 MAX_FILE_LINES        = 500
 MAX_VALIDATOR_RETRIES = 2   # tentativas de correção após rejeição do validator
+MAX_BUILD_FAILURES    = 3   # falhas de build acumuladas antes de pular o arquivo
+
+_REASON_NO_CHANGE = "no_change"  # sinal: modelo confirmou que não há alterações
 
 
 _SKIP_PATTERNS = [
@@ -43,6 +47,17 @@ _SKIP_PATTERNS = [
      "Interface pura (sem lógica)"),
     (re.compile(r'(?m)^\s*[A-Z][A-Z_0-9]+\s*\([^)]+\)\s*[,;]'),
      "Enum com construtor parametrizado"),
+]
+
+# Padrões que só se aplicam em fases estruturais (SOLID, arquitetura, etc.)
+_STRUCTURAL_PHASE_KEYWORDS = {
+    "solid", "architecture", "patterns", "clean_code",
+    "tracking", "nomenclature", "structure", "final_keywords",
+}
+_SKIP_FOR_STRUCTURAL = [
+    (re.compile(r'@Document\b'), "@Document — holder de dados MongoDB"),
+    (re.compile(r'@Entity\b'),   "@Entity — holder de dados JPA"),
+    (re.compile(r'@Table\b'),    "@Table — holder de dados JPA"),
 ]
 
 
@@ -85,6 +100,13 @@ class FailedFilesTracker:
                 e["retried"] = True
         self._save()
 
+    def get_build_failure_count(self, file_path: str) -> int:
+        """Conta falhas de build reais (exclui 'código idêntico' e skips semânticos)."""
+        return sum(
+            1 for e in self._entries
+            if e["file"] == file_path and "build quebrou" in e.get("reason", "")
+        )
+
 
 _failed_tracker: FailedFilesTracker | None = None
 
@@ -100,12 +122,17 @@ def get_failed_tracker(logs_dir: str = "logs") -> FailedFilesTracker:
 # Utilitários
 # ---------------------------------------------------------------------------
 
-def should_skip(file_path: str, code: str) -> tuple[bool, str]:
+def should_skip(file_path: str, code: str, phase: str = "") -> tuple[bool, str]:
     if len(code.splitlines()) > MAX_FILE_LINES:
         return True, f"Arquivo muito grande ({len(code.splitlines())} linhas)"
     for pattern, reason in _SKIP_PATTERNS:
         if pattern.search(code):
             return True, reason
+    phase_lower = phase.lower() if phase else ""
+    if any(kw in phase_lower for kw in _STRUCTURAL_PHASE_KEYWORDS):
+        for pattern, reason in _SKIP_FOR_STRUCTURAL:
+            if pattern.search(code):
+                return True, reason
     return False, ""
 
 
@@ -147,7 +174,8 @@ def _test_path_for(main_file: str, repo_path: str) -> str | None:
 def _generate_and_validate(original: str, rules: str, mode: str,
                              file_name: str, file_path: str,
                              phase: str = "",
-                             cache=None) -> tuple[str | None, str]:
+                             cache=None,
+                             semantic_mem=None) -> tuple[str | None, str]:
     """
     Chama a IA e valida o resultado com injeção de contexto de dependências.
     dep_context é obtido do cache ou gerado, e passado separado para build_prompt.
@@ -181,6 +209,11 @@ def _generate_and_validate(original: str, rules: str, mode: str,
 
     phase_delta = rules + test_context
 
+    if semantic_mem is not None:
+        mem_context = semantic_mem.search(f"{phase} {file_name}")
+        if mem_context:
+            phase_delta = phase_delta + f"\n\n[APRENDIZADOS ANTERIORES]:\n{mem_context}"
+
     new_code = call_ai(original, phase_delta, mode, file_name,
                        file_path=file_path, phase=phase,
                        dep_context=dep_context)
@@ -188,14 +221,24 @@ def _generate_and_validate(original: str, rules: str, mode: str,
     if not new_code:
         return None, "IA não gerou código"
 
+    # Melhoria 1: código idêntico = modelo confirmou que não há mudanças necessárias
+    if new_code.strip() == original.strip():
+        return None, _REASON_NO_CHANGE
+
     valid, reason = is_valid_java(original, new_code)
     if valid:
         # Skill: Validador de Integridade de Nome
         from java.validator import validate_class_name_matches_file
         is_name_ok, name_error = validate_class_name_matches_file(new_code, file_path)
-        if is_name_ok:
-            return new_code, ""
-        reason = f"ERRO DE INTEGRIDADE: {name_error}"
+        if not is_name_ok:
+            reason = f"ERRO DE INTEGRIDADE: {name_error}"
+        else:
+            # Melhoria 2: Validação de package
+            is_pkg_ok, pkg_error = validate_package_matches_path(new_code, file_path)
+            if not is_pkg_ok:
+                reason = f"ERRO DE PACKAGE: {pkg_error}"
+            else:
+                return new_code, ""
 
     log(f"  Validator rejeitou: {reason} — tentando correção", "WARN")
 
@@ -219,15 +262,22 @@ def _generate_and_validate(original: str, rules: str, mode: str,
             log(f"  Correção {attempt}: sem resposta", "WARN")
             break
 
+        if corrected and corrected.strip() == original.strip():
+            return None, _REASON_NO_CHANGE
+
         valid, reason = is_valid_java(original, corrected)
         if valid:
-            # Skill: Validador de Integridade de Nome
             from java.validator import validate_class_name_matches_file
             is_name_ok, name_error = validate_class_name_matches_file(corrected, file_path)
-            if is_name_ok:
-                log(f"  Correção {attempt}: aceita ✓", "OK")
-                return corrected, ""
-            reason = f"ERRO DE INTEGRIDADE: {name_error}. O nome da classe deve ser '{file_name.replace('.java','')}'."
+            if not is_name_ok:
+                reason = f"ERRO DE INTEGRIDADE: {name_error}. O nome da classe deve ser '{file_name.replace('.java','')}'."
+            else:
+                is_pkg_ok, pkg_error = validate_package_matches_path(corrected, file_path)
+                if not is_pkg_ok:
+                    reason = f"ERRO DE PACKAGE: {pkg_error}"
+                else:
+                    log(f"  Correção {attempt}: aceita ✓", "OK")
+                    return corrected, ""
 
         log(f"  Correção {attempt}: ainda rejeitado — {reason}", "WARN")
         rejected_code = corrected
@@ -243,15 +293,23 @@ def _refactor_whole_file(file: str, original: str, rules: str,
                           repo_path: str, phase: str,
                           reporter: PhaseReporter,
                           exec_logger: ExecutionLogger | None,
-                          cache=None) -> bool:
+                          cache=None,
+                          semantic_mem=None) -> bool:
     file_name = os.path.basename(file)
     mode      = _mode_for(file)
 
     new_code, reason = _generate_and_validate(
-        original, rules, mode, file_name, file, phase=phase, cache=cache
+        original, rules, mode, file_name, file, phase=phase, cache=cache,
+        semantic_mem=semantic_mem,
     )
 
     if not new_code:
+        if reason == _REASON_NO_CHANGE:
+            log(f"  {file_name}: modelo confirmou que não há alterações necessárias", "OK")
+            if exec_logger:
+                exec_logger.log_file_skipped(phase, file_name, "Não necessita alterações")
+            reporter.record_skipped(phase, file_name, "Não necessita alterações")
+            return False
         log(f"  {file_name}: falhou — {reason}", "WARN")
         get_failed_tracker().record(file, phase, reason)
         if exec_logger:
@@ -270,6 +328,7 @@ def _refactor_whole_file(file: str, original: str, rules: str,
         
         # Skill: Detecção de Impacto em Cascata
         if "cannot find symbol" in build_output or "does not override" in build_output:
+            _live(active_skill="Sincronia Contextual")
             log("  [Impacto Detectado] Mudança de contrato detectada. Tentando sincronização contextual...", "PHASE")
             _attempt_global_sync(build_output, repo_path, rules, phase, new_code)
             success, build_output = maven_test(repo_path)
@@ -296,6 +355,7 @@ def _refactor_whole_file(file: str, original: str, rules: str,
                     if success: return True # Resolvido restaurando o culpado
         
         # Skill: Raio-X de Erros (Continua para o arquivo atual)
+        _live(active_skill="Raio-X de Erros")
         error_diagnostics = []
         raw_error_lines = [l for l in build_output.splitlines() if "[ERROR]" in l and ".java:[" in l][:5]
         
@@ -317,6 +377,7 @@ def _refactor_whole_file(file: str, original: str, rules: str,
         exec_logger.log_detailed_diagnostic(phase, file_name, build_output, error_diagnostics)
 
         # Skill: Reforço de Import com Dicionário Global
+        _live(active_skill="Project Dictionary")
         if "cannot find symbol" in error_summary:
             from java.dictionary import build_project_dictionary
             proj_map = None
@@ -339,6 +400,7 @@ def _refactor_whole_file(file: str, original: str, rules: str,
             phase        = phase
         )
 
+        _live(active_skill="Auto-Cura")
         if corrected_code:
             write_file(file, corrected_code)
             success, _ = maven_test(repo_path)
@@ -371,7 +433,8 @@ def _refactor_by_method(file: str, original: str, rules: str,
                          repo_path: str, phase: str,
                          reporter: PhaseReporter,
                          exec_logger: ExecutionLogger | None,
-                         cache=None) -> bool:
+                         cache=None,
+                         semantic_mem=None) -> bool:
     file_name = os.path.basename(file)
     mode      = _mode_for(file)
 
@@ -381,7 +444,8 @@ def _refactor_by_method(file: str, original: str, rules: str,
     if not methods:
         log(f"  {file_name}: nenhum método extraível — tentando arquivo inteiro")
         return _refactor_whole_file(file, original, rules, repo_path, phase,
-                                    reporter, exec_logger, cache=cache)
+                                    reporter, exec_logger, cache=cache,
+                                    semantic_mem=semantic_mem)
 
     log(f"  {file_name}: {len(methods)} métodos a processar")
 
@@ -395,13 +459,14 @@ def _refactor_by_method(file: str, original: str, rules: str,
         context = build_method_context(header, method)
 
         ai_response, reason = _generate_and_validate(
-            original  = context,
-            rules     = rules,
-            mode      = mode,
-            file_name = file_name,
-            file_path = file,
-            phase     = phase,
-            cache     = cache,
+            original     = context,
+            rules        = rules,
+            mode         = mode,
+            file_name    = file_name,
+            file_path    = file,
+            phase        = phase,
+            cache        = cache,
+            semantic_mem = semantic_mem,
         )
 
         if not ai_response:
@@ -466,7 +531,8 @@ def _refactor_by_method(file: str, original: str, rules: str,
 def refactor_file(file: str, rules: str, repo_path: str,
                   phase: str, reporter: PhaseReporter,
                   exec_logger: ExecutionLogger | None = None,
-                  cache=None) -> bool:
+                  cache=None,
+                  semantic_mem=None) -> bool:
     file_name = os.path.basename(file)
 
     # Phase skip: se já processamos este arquivo nesta fase neste run, pula
@@ -477,6 +543,17 @@ def refactor_file(file: str, rules: str, repo_path: str,
             reporter.record_skipped(phase, file_name, f"cache: {phase_name} já aplicada")
             return False
 
+    # Melhoria 4: pular arquivos com histórico de falhas de build repetidas
+    build_fails = get_failed_tracker().get_build_failure_count(file)
+    if build_fails >= MAX_BUILD_FAILURES:
+        log(f"  {file_name}: {build_fails}x build quebrou em fases anteriores — pulando", "WARN")
+        if exec_logger:
+            exec_logger.log_file_skipped(phase, file_name,
+                                         f"Histórico: {build_fails}x build quebrou")
+        reporter.record_skipped(phase, file_name,
+                                f"Histórico de falhas ({build_fails}x build quebrou)")
+        return False
+
     log(f"Processando [{_mode_for(file)}]: {file_name}")
 
     if exec_logger:
@@ -484,7 +561,8 @@ def refactor_file(file: str, rules: str, repo_path: str,
 
     original = read_file(file)
 
-    skip, reason = should_skip(file, original)
+    # Melhoria 3: passa phase para considerar padrões de skip por fase
+    skip, reason = should_skip(file, original, phase)
     if skip:
         log(f"  {file_name} PULADO: {reason}", "WARN")
         if exec_logger:
@@ -495,10 +573,24 @@ def refactor_file(file: str, rules: str, repo_path: str,
     if is_large_file(original, LARGE_FILE_THRESHOLD):
         log(f"  {file_name}: arquivo grande → processamento por método")
         success = _refactor_by_method(file, original, rules, repo_path, phase,
-                                      reporter, exec_logger, cache=cache)
+                                      reporter, exec_logger, cache=cache,
+                                      semantic_mem=semantic_mem)
     else:
         success = _refactor_whole_file(file, original, rules, repo_path, phase,
-                                       reporter, exec_logger, cache=cache)
+                                       reporter, exec_logger, cache=cache,
+                                       semantic_mem=semantic_mem)
+
+    if semantic_mem is not None:
+        phase_label = phase.split("/")[-1].replace(".md", "")
+        file_type   = "test" if "/test/" in file.replace("\\", "/") else "src"
+        if success:
+            semantic_mem.store(
+                f"SUCCESS: phase={phase_label} file={file_name} type={file_type} — refactoring accepted and build passed"
+            )
+        else:
+            semantic_mem.store(
+                f"FAILURE: phase={phase_label} file={file_name} type={file_type} — refactoring rejected or build failed"
+            )
 
     if success and cache is not None:
         phase_name = phase.split("/")[-1].replace(".md", "")

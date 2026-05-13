@@ -20,6 +20,7 @@ from ai.prompt import build_prompt
 from ai.sanitizer import clean_output
 from ai.agent_router import analyze_file, select_agent_priority, should_use_claude
 from core.logger import log
+from core.live_state import update as _live
 
 _OOM_MODELS: set[str] = set()
 _OOM_SIGNALS = ("model requires more system", "not enough memory", "out of memory", "insufficient memory", "500")
@@ -152,6 +153,7 @@ def _try_local_agent(agent: str, model_name: str, prompt: str, temperature: floa
             current_prompt = _build_correction_prompt(prompt, last_output, last_error)
 
         log(f"  [{model_name}] tentativa {attempt}/{MAX_RETRIES} (temp={temperature})")
+        _live(current_model=model_name, active_skill="")
         raw, is_oom = call_model(model_name, current_prompt, temperature=temperature)
 
         if is_oom:
@@ -189,6 +191,7 @@ def _try_local_agent(agent: str, model_name: str, prompt: str, temperature: floa
 def _try_claude(prompt: str) -> str | None:
     if not CLAUDE_API_KEY:
         return None
+    _live(current_model="claude-api", active_skill="")
     log("  [claude-api] acionado")
     raw    = call_claude(prompt)
     result = clean_output(raw)
@@ -311,8 +314,8 @@ def call_ai(code: str, rules: str, mode: str, file_name: str,
             dep_context: str = "") -> str | None:
     """Entrada principal — gera código a partir das regras da fase."""
     from ai.compressor import maybe_compress
-    compressed_code = maybe_compress(code)
-    prompt = build_prompt(compressed_code, rules, mode, file_name, dep_context=dep_context)
+    compressed_dep = maybe_compress(dep_context) if dep_context else dep_context
+    prompt = build_prompt(code, rules, mode, file_name, dep_context=compressed_dep)
     return _run_pipeline(prompt, code, file_path, file_name, mode, phase)
 
 

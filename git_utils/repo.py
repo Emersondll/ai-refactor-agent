@@ -26,9 +26,8 @@ def clone_or_update(repo: str, base_dir: str) -> tuple[str | None, str | None]:
     name      = repo.rstrip("/").split("/")[-1].replace(".git", "")
     repo_path = os.path.join(base_dir, name)
     
-    # Branch com timestamp — identificar execução
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    branch_name = f"refactor/ai-{timestamp}"
+    # Nome de branch fixo para evitar perda de progresso entre execuções
+    branch_name = "refactor/ai-agent-automation"
 
     if not os.path.exists(repo_path):
         # --- NOVO CLONE ---
@@ -70,13 +69,22 @@ def clone_or_update(repo: str, base_dir: str) -> tuple[str | None, str | None]:
             log(f"Aviso no pull: {err.strip()[:200]}", "WARN")
 
     # CRIA A BRANCH DE TRABALHO
-    log(f"Criando branch: {branch_name}")
-    code, _, err = run_cmd(f"git checkout -b {branch_name}", cwd=repo_path)
+    # CRIA OU VOLTA PARA A BRANCH DE TRABALHO
+    log(f"Preparando branch: {branch_name}")
+    code_exists, _, _ = run_cmd(f"git show-ref --verify --quiet refs/heads/{branch_name}", cwd=repo_path)
+    
+    if code_exists == 0:
+        log(f"Branch {branch_name} já existe. Fazendo checkout...")
+        code, _, err = run_cmd(f"git checkout {branch_name}", cwd=repo_path)
+    else:
+        log(f"Criando nova branch: {branch_name}")
+        code, _, err = run_cmd(f"git checkout -b {branch_name}", cwd=repo_path)
+
     if code != 0:
-        log(f"Falha ao criar branch: {err.strip()[:300]}", "ERR")
+        log(f"Falha ao acessar branch {branch_name}: {err.strip()[:300]}", "ERR")
         return None, None
     
-    log(f"Branch criada com sucesso", "OK")
+    log(f"Branch preparada com sucesso", "OK")
     return repo_path, branch_name
 
 

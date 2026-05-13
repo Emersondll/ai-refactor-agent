@@ -1,17 +1,28 @@
 """
 prompt.py — ai/prompt.py
 
-BASE_CONSTRAINTS: constante global com regras técnicas e formato de output.
-  Enviada em toda chamada — não modifique para não quebrar o output format.
+SOUL: personalidade e princípios carregados de soul.md (raiz do projeto).
+BASE_CONSTRAINTS: regras técnicas e formato de output obrigatório.
 
-build_prompt(): compõe BASE_CONSTRAINTS + phase delta + dep_context separado.
-  dep_context é colocado em sua própria seção para ser facilmente identificável.
+build_prompt(): compõe SOUL + BASE_CONSTRAINTS + phase delta + dep_context.
 """
+
+import os
+
+
+def _load_soul() -> str:
+    soul_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "soul.md")
+    try:
+        with open(soul_path, encoding="utf-8") as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        return ""
+
+
+_SOUL = _load_soul()
 
 
 BASE_CONSTRAINTS = """\
-You are a senior Java engineer.
-
 ### TECHNICAL CONSTRAINTS (MANDATORY)
 PRESERVE the package declaration exactly as-is.
 PRESERVE all existing import statements.
@@ -56,22 +67,21 @@ def _build_task(mode: str, file_name: str) -> str:
 
 def build_prompt(code: str, phase_delta: str, mode: str, file_name: str,
                  dep_context: str = "") -> str:
-    """
-    Monta o prompt completo para o modelo.
-
-    Args:
-        code: Código Java do arquivo a processar.
-        phase_delta: Regras específicas da fase (apenas o que é exclusivo).
-        mode: 'refactor' ou 'test'.
-        file_name: Nome do arquivo Java (ex: CustomerService.java).
-        dep_context: Contexto de dependências compacto (opcional).
-    """
-    parts = [
+    parts = []
+    if _SOUL:
+        parts.append(_SOUL)
+    parts += [
         BASE_CONSTRAINTS,
         f"\n### PHASE RULES\n{phase_delta.strip()}",
         f"\n### TASK\n{_build_task(mode, file_name)}",
     ]
     if dep_context and dep_context.strip():
         parts.append(f"\n### DEPENDENCY CONTEXT\n{dep_context.strip()}")
+
+    from ai.context7_client import get_phase_docs
+    live_docs = get_phase_docs(phase_delta)
+    if live_docs:
+        parts.append(f"\n### LIBRARY DOCUMENTATION (live)\n{live_docs}")
+
     parts.append(f"\n### SOURCE FILE TO PROCESS\n```java\n{code}\n```")
     return "\n".join(parts)

@@ -7,10 +7,13 @@ Um agente de refatoração Java autônomo e meticuloso, projetado para rodar 100
 Diferente de refatoradores simples, este agente utiliza técnicas avançadas de IA Agentica:
 
 - **Reviewer Pattern (O Crítico Sênior)**: Todo código refatorado por modelos menores passa por uma revisão obrigatória do modelo mais forte (ex: Qwen 2.5 14B), garantindo qualidade sênior.
-- **Dependency Context Injection**: O agente analisa os `imports` do projeto e injeta as assinaturas das classes dependentes no prompt, evitando alucinações de métodos e erros de tipagem.
+- **Enforced 90% Coverage (JaCoCo Guardrail)**: O agente exige e valida matematicamente uma cobertura mínima de 90% em testes unitários para o núcleo do sistema antes e depois da refatoração.
+- **Vertical Flow Slicing (End-to-End)**: O agente pode operar em modo de fluxo, refatorando fatias completas da aplicação (Controller -> Service -> Repository) para garantir integridade de negócio.
+- **Behavioral Context Sync**: Injeta os arquivos de teste unitário no prompt da IA como restrições comportamentais, impedindo que a refatoração quebre regras de negócio existentes.
+- **Java 17+ Modernization**: Identificação automática de DTOs e conversão para `record`, aproveitando recursos modernos da linguagem.
+- **Post-Refactor Sanitization**: Etapa final que remove métodos órfãos e consolida códigos duplicados (DRY) após a refatoração.
 - **Self-Healing Build**: Em caso de falha no Maven, o agente captura o erro de compilação e tenta se "auto-curar" em um novo ciclo de correção.
-- **Semicolon Syntax Repair**: Skill integrada para correção automática de erros triviais de sintaxe comuns em modelos de linguagem.
-- **Pipeline de Fases Inteligente**: Refatora em etapas lógicas (Arquitetura -> SOLID -> Nomenclatura -> Imutabilidade -> Javadoc) para evitar retrabalho.
+- **Dependency Context Injection**: O agente analisa os `imports` do projeto e injeta as assinaturas das classes dependentes no prompt, evitando alucinações.
 
 ## 🏗️ Estratégia de Modelos (Hierarquia)
 
@@ -61,17 +64,32 @@ ollama pull neural-chat:7b
 1. Clone o repositório.
 2. Crie um ambiente virtual: `python -m venv .venv && source .venv/bin/activate`
 3. Instale as dependências: `pip install -r requirements.txt`
-4. Configure o arquivo `config.py` com os nomes dos seus modelos locais.
+4. Configure o arquivo `config.py` ou seu arquivo `.env`:
+   - `FLOW_MODE=true`: Ativa a refatoração end-to-end por fluxos.
+   - `USE_CLAUDE_FALLBACK=true`: Ativa o Claude como modelo de segurança.
 
 ## 🏃 Como Usar
 
-Execute o orquestrador principal:
+Para evitar conflitos com os pacotes do sistema (especialmente no Linux), é recomendável executar o projeto dentro do ambiente virtual que você criou.
+
+1. Ative o ambiente virtual:
+2. Execute o orquestrador principal:
 
 ```bash
+source .venv/bin/activate
 python main.py
 ```
 
-Informe a URL do repositório Git ou o caminho local que deseja refatorar. O agente criará uma branch específica para as alterações.
+Você verá uma saída similar a esta, aguardando que você informe o repositório a ser trabalhado:
+
+```text
+[17:13:09] RUN  ============================================================
+[17:13:09] RUN  AI Refactor Agent — Orquestrador Principal
+[17:13:09] RUN  ============================================================
+Repo URL ou caminho local: {Insira aqui o diretorio do repositório ou url git}
+```
+
+Ao inserir a URL do repositório Git ou o caminho local, o agente criará uma branch específica para realizar as alterações.
 
 ## 📂 Estrutura do Projeto
 
