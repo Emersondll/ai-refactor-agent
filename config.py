@@ -36,6 +36,12 @@ LLMLINGUA_RATIO  = float(os.getenv("LLMLINGUA_RATIO", "0.6"))
 OLLAMA_EMBED_MODEL = os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
 OLLAMA_BASE_URL    = os.getenv("OLLAMA_BASE_URL",    "http://localhost:11434")
 
+# ---------------------------------------------------------------------------
+# Agent Loop (disabled by default — enable via .env)
+# ---------------------------------------------------------------------------
+USE_AGENT_MODE   = os.getenv("USE_AGENT_MODE",   "false").lower() == "true"
+AGENT_MAX_CYCLES = int(os.getenv("AGENT_MAX_CYCLES", "20"))
+
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
 PHASES_DIR = os.path.join(BASE_DIR, "phases")
 REPOS_DIR  = os.path.join(BASE_DIR, "repos")
