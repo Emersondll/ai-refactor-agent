@@ -1,6 +1,6 @@
 import os
 import xml.etree.ElementTree as ET
-from core.executor import run_cmd
+from core.utils import run_cmd
 from core.logger import log
 
 # Wrapper para garantir que o Maven use o Java 22 via SDKMAN no Linux

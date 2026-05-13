@@ -12,7 +12,7 @@ Fluxo:
 
 import os
 from datetime import datetime
-from core.executor import run_cmd
+from core.utils import run_cmd
 from core.logger import log
 
 

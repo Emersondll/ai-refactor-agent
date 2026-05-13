@@ -16,7 +16,6 @@ from memory.cache import Cache
 from memory.semantic_memory import SemanticMemory
 from java.refactor import refactor_file, generate_tests, get_java_files, get_failed_tracker
 from java.compiler import get_global_coverage, maven_test_with_coverage, maven_test
-from java.flow import get_vertical_slices
 from java.sanitizer import run_sanitization
 
 
@@ -43,7 +42,7 @@ def main():
     def start_data_updater():
         while True:
             try:
-                subprocess.run(["python3", "ai/dashboard_data.py"], capture_output=True)
+                subprocess.run(["python3", "dashboard/data.py"], capture_output=True)
             except: pass
             time.sleep(10) # Atualiza o JSON a cada 10s
 

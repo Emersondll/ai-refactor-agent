@@ -1,6 +1,6 @@
 import re
 from core.logger import log
-from core.executor import run_cmd
+from core.utils import run_cmd
 
 def detect_signature_changes(old_code: str, new_code: str) -> list[tuple[str, str]]:
     """

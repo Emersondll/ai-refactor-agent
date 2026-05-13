@@ -15,6 +15,10 @@ logs/
 last_run.txt
 failed_files.json
 processed_repos.txt
+dashboard_status.json
+
+# Development scratch scripts
+scratch/
 
 # Repositories downloaded for refactoring
 repos/
