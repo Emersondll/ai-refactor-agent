@@ -6,15 +6,14 @@ import os
 import subprocess
 import threading
 import time
-from config import PHASES_DIR, REPOS_DIR, LOGS_DIR, USE_AGENT_MODE
+from config import PHASES_DIR, REPOS_DIR, LOGS_DIR, USE_AGENT_MODE, BASE_DIR
 from core.logger import log
-from core.utils import read_file
 from core.reporter import PhaseReporter
 from core.execution_logger import ExecutionLogger
 from git_utils.repo import clone_or_update, commit_and_push
 from memory.cache import Cache
 from memory.semantic_memory import SemanticMemory
-from java.refactor import refactor_file, generate_tests, get_java_files, get_failed_tracker
+from java.refactor import generate_tests, get_java_files, get_failed_tracker
 from java.compiler import get_global_coverage, maven_test_with_coverage, maven_test
 from java.sanitizer import run_sanitization
 
@@ -118,20 +117,50 @@ def main():
         run_agent_loop(repo_path, reporter, exec_logger, cache, semantic_mem)
     else:
         log("Modo Pipeline fixo (USE_AGENT_MODE=false).", "PHASE")
-        phase_paths = sorted(
-            os.path.join(root, fname)
-            for root, _, files in os.walk(PHASES_DIR)
-            for fname in files
-            if fname.endswith(".md")
-        )
-        for phase_path in phase_paths:
-            phase_file = os.path.basename(phase_path)
-            rules = read_file(phase_path)
-            log(f"Iniciando Fase: {phase_file}", "PHASE")
-            exec_logger.log_phase_start(phase_file, f"Iniciando {phase_file}")
-            for f_path in get_java_files(repo_path):
-                refactor_file(f_path, rules, repo_path, phase_path, reporter, exec_logger,
-                              cache=cache, semantic_mem=semantic_mem)
+        import glob as _glob
+        import yaml as _yaml
+        from java.community_runner import run_skill as _run_skill
+        from java.llm_reviewer import review_diff as _review_diff
+        from java.compiler import maven_test as _maven_test
+        from core.utils import run_cmd as _run_cmd
+        from config import MODEL_SOLID as _MODEL_SOLID
+
+        configs_dir = os.path.join(BASE_DIR, "phases", "configs")
+        config_paths = sorted(_glob.glob(os.path.join(configs_dir, "*.yml")))
+
+        if not config_paths:
+            log(f"Nenhum config .yml encontrado em {configs_dir}", "ERR")
+            return
+
+        for config_path in config_paths:
+            with open(config_path, "r", encoding="utf-8") as _f:
+                skill_config = _yaml.safe_load(_f)
+            skill_id = skill_config.get("skill", os.path.basename(config_path))
+            log(f"Iniciando Skill: {skill_id}", "PHASE")
+            exec_logger.log_phase_start(skill_id, f"Community tool: {skill_id}")
+
+            changed, diff = _run_skill(skill_config, repo_path)
+            if not changed:
+                log(f"  [{skill_id}] sem alterações — pulando", "OK")
+                cache.mark_phase_done(skill_id)
+                continue
+
+            verdict = _review_diff(diff, skill_config.get("review_criteria", ""), _MODEL_SOLID)
+            log(f"  [{skill_id}] revisor: {verdict}")
+
+            if verdict == "REJECT":
+                _run_cmd("git restore .", cwd=repo_path)
+                cache.mark_phase_done(skill_id)
+                log(f"  [{skill_id}] revertido (REJECT)", "WARN")
+                continue
+
+            build_ok, build_output = _maven_test(repo_path)
+            if not build_ok:
+                log(f"  [{skill_id}] build quebrado após APPROVE — revertendo", "WARN")
+                _run_cmd("git restore .", cwd=repo_path)
+            else:
+                cache.mark_phase_done(skill_id)
+                log(f"  [{skill_id}] aceito ✓", "OK")
 
     # --- Sanitização Final ---
     log("Iniciando Sanitização Final...", "PHASE")
