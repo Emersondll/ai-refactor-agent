@@ -53,6 +53,9 @@ _SKIP_PATTERNS = [
 _STRUCTURAL_PHASE_KEYWORDS = {
     "solid", "architecture", "patterns", "clean_code",
     "tracking", "nomenclature", "structure", "final_keywords",
+    # community skills — @Document/@Entity não devem ser convertidas/reestruturadas
+    "community", "record_migration", "builder_pattern", "dead_code",
+    "introduce_parameter", "strategy_pattern", "encapsulate_field",
 }
 _SKIP_FOR_STRUCTURAL = [
     (re.compile(r'@Document\b'), "@Document — holder de dados MongoDB"),
@@ -592,7 +595,7 @@ def refactor_file(file: str, rules: str, repo_path: str,
                 f"FAILURE: phase={phase_label} file={file_name} type={file_type} — refactoring rejected or build failed"
             )
 
-    if success and cache is not None:
+    if cache is not None:
         phase_name = phase.split("/")[-1].replace(".md", "")
         cache.mark_phase_done(file, phase_name)
 
