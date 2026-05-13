@@ -6,7 +6,7 @@ import os
 import subprocess
 import threading
 import time
-from config import PHASES_DIR, REPOS_DIR, LOGS_DIR
+from config import PHASES_DIR, REPOS_DIR, LOGS_DIR, USE_AGENT_MODE
 from core.logger import log
 from core.utils import read_file
 from core.reporter import PhaseReporter
@@ -107,29 +107,31 @@ def main():
     cache        = Cache(repo_path)
     semantic_mem = SemanticMemory()
 
-    # --- Fases de Refatoração (SOLID) ---
-    phase_paths = sorted(
-        os.path.join(root, fname)
-        for root, _, files in os.walk(PHASES_DIR)
-        for fname in files
-        if fname.endswith(".md")
-    )
+    # --- Refatoração: Agent Loop ou Pipeline fixo ---
     _all_java_files = get_java_files(repo_path)
     exec_logger.log_files_total(len(_all_java_files))
     exec_logger.log_files_queue([os.path.basename(f) for f in _all_java_files])
 
-    for phase_path in phase_paths:
-        phase_file = os.path.basename(phase_path)
-        rules = read_file(phase_path)
-        log(f"Iniciando Fase: {phase_file}", "PHASE")
-        exec_logger.log_phase_start(phase_file, f"Iniciando {phase_file}")
-
-        # Pega fatias verticais ou arquivos soltos
-        files = get_java_files(repo_path)
-        for f_path in files:
-            # Refatora com segurança
-            refactor_file(f_path, rules, repo_path, phase_path, reporter, exec_logger,
-                          cache=cache, semantic_mem=semantic_mem)
+    if USE_AGENT_MODE:
+        log("Modo Agente ativado — Claude planeja, Ollama executa.", "PHASE")
+        from agent.loop import run_agent_loop
+        run_agent_loop(repo_path, reporter, exec_logger, cache, semantic_mem)
+    else:
+        log("Modo Pipeline fixo (USE_AGENT_MODE=false).", "PHASE")
+        phase_paths = sorted(
+            os.path.join(root, fname)
+            for root, _, files in os.walk(PHASES_DIR)
+            for fname in files
+            if fname.endswith(".md")
+        )
+        for phase_path in phase_paths:
+            phase_file = os.path.basename(phase_path)
+            rules = read_file(phase_path)
+            log(f"Iniciando Fase: {phase_file}", "PHASE")
+            exec_logger.log_phase_start(phase_file, f"Iniciando {phase_file}")
+            for f_path in get_java_files(repo_path):
+                refactor_file(f_path, rules, repo_path, phase_path, reporter, exec_logger,
+                              cache=cache, semantic_mem=semantic_mem)
 
     # --- Sanitização Final ---
     log("Iniciando Sanitização Final...", "PHASE")
