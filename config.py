@@ -16,14 +16,16 @@ MODEL_DOC   = "neural-chat:7b"     # (4.1GB) -> Javadoc / Documentação
 MODEL_STRUCT = "qwen2.5-coder:7b"   # (4.7GB) -> Estrutura / Nomenclatura (Melhor para Java)
 MODEL_CLEAN  = "gemma4:latest"     # (9.6GB) -> Clean Code / Testes
 MODEL_SOLID  = "qwen2.5-coder:14b" # (9.0GB) -> SOLID / Arquitetura (O Crítico)
-MODEL_RECOVERY = "gemma4:latest"   # -> Autocura Local Especializada (Second Opinion)
+MODEL_RECOVERY  = "gemma4:latest"   # -> Autocura Local Especializada (Second Opinion)
+MODEL_REVIEWER  = os.getenv("MODEL_REVIEWER", MODEL_STRUCT)  # qwen2.5-coder:7b — revisor de diffs (rápido, sem swap de RAM)
 CLAUDE_MODEL        = "claude-sonnet-4-6"
 CLAUDE_API_KEY      = os.getenv("ANTHROPIC_API_KEY")
 USE_CLAUDE_FALLBACK = os.getenv("USE_CLAUDE_FALLBACK", "true").lower() == "true"
 FLOW_MODE           = os.getenv("FLOW_MODE", "false").lower() == "true"
 
-TIMEOUT     = 600
-MAX_RETRIES = 2
+TIMEOUT      = 600   # refatoração — tempo máximo por chamada Ollama
+TIMEOUT_TEST = 300   # geração de testes — 5 min por chamada; dá espaço ao gemma4 e 14b sem bloquear timeout de arquivo
+MAX_RETRIES  = 2
 
 # ---------------------------------------------------------------------------
 # Performance Skills (all disabled by default — enable via .env)
@@ -44,9 +46,15 @@ GJF_PATH = os.getenv("GJF_PATH", "google-java-format")
 # ---------------------------------------------------------------------------
 # Agent Loop (disabled by default — enable via .env)
 # ---------------------------------------------------------------------------
-USE_AGENT_MODE    = os.getenv("USE_AGENT_MODE",    "false").lower() == "true"
-AGENT_MAX_CYCLES  = int(os.getenv("AGENT_MAX_CYCLES", "20"))
-USE_LOCAL_PLANNER = os.getenv("USE_LOCAL_PLANNER", "false").lower() == "true"
+USE_AGENT_MODE   = os.getenv("USE_AGENT_MODE",  "false").lower() == "true"
+AGENT_MAX_CYCLES = int(os.getenv("AGENT_MAX_CYCLES", "20"))
+# PLANNER_MODE: "local" → MODEL_PLANNER planeja (totalmente local)
+#               "claude" → Claude API planeja, Ollama executa (híbrido)
+PLANNER_MODE      = os.getenv("PLANNER_MODE", "local").lower()
+USE_LOCAL_PLANNER = PLANNER_MODE == "local"  # compatibilidade com código legado
+# Modelo dedicado ao planner local — menor e mais rápido que MODEL_SOLID
+# O planner só precisa gerar JSON de decisões, não código Java complexo
+MODEL_PLANNER     = os.getenv("MODEL_PLANNER", MODEL_STRUCT)
 
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
 PHASES_DIR = os.path.join(BASE_DIR, "phases")

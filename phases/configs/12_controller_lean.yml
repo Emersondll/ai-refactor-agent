@@ -1,0 +1,15 @@
+skill: controller-lean
+description: Aplica SRP em @RestController — remove lógica de negócio dos handlers, delega ao Service
+tool: llm
+method_level: true
+skill_name: java-controller-lean
+skill_section: LLM INSTRUCTIONS
+detect_pattern: controller_logic
+min_lines: 0
+max_agent: standard
+skip_dep_context: true
+review_criteria: |
+  O diff deve APENAS remover lógica de negócio (if/else, loops, cálculos) dos métodos handler.
+  REJEITE se: mapeamentos HTTP alterados, status codes diferentes, @Valid removido,
+  novos métodos criados no Service, ou comportamento HTTP diferente.
+  APROVE se: o controller ficou mais fino delegando ao service sem mudar a API HTTP.

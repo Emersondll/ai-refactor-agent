@@ -102,13 +102,39 @@ def _find_class_file(class_name: str, repo_path: str) -> str | None:
 
 def _extract_simplified_header(code: str, full_name: str) -> str:
     """
-    Extrai apenas assinaturas de métodos públicos/protegidos.
+    Extrai assinaturas de métodos públicos/protegidos.
+    Para enums, preserva os valores declarados para evitar alucinação do LLM.
+    Para records, injeta CONSTRUCTOR CALL com nomes reais dos parâmetros.
     Remove: campos privados, comentários, imports, corpos de métodos.
-    Objetivo: ~80-120 tokens por dependência (vs ~400 tokens antes).
     """
+    is_enum = bool(re.search(r'\benum\b', code))
+    is_record = bool(re.search(r'\brecord\b', code))
+
+    # Pre-extract record constructor hint to avoid @JsonProperty confusion
+    constructor_hint = ""
+    if is_record:
+        record_match = re.search(r'\brecord\s+(\w+)\s*\(([^)]+)\)', code, re.DOTALL)
+        if record_match:
+            class_name = record_match.group(1)
+            params_raw = record_match.group(2).replace('\n', ' ')
+            params = [p.strip() for p in params_raw.split(',') if p.strip()]
+            param_names = []
+            for p in params:
+                words = p.split()
+                if words:
+                    last = words[-1].rstrip(')')
+                    if last and last.isidentifier():
+                        param_names.append(last)
+            if param_names:
+                constructor_hint = (
+                    f"    // CONSTRUCTOR CALL: new {class_name}("
+                    + ", ".join(param_names) + ")"
+                )
+
     lines = code.splitlines()
     header_lines = []
     class_def_found = False
+    in_enum_constants = False
 
     for line in lines:
         stripped = line.strip()
@@ -124,10 +150,23 @@ def _extract_simplified_header(code: str, full_name: str) -> str:
             class_def_found = True
             decl = stripped.split('{')[0].strip()
             header_lines.append(decl + " {")
+            if is_enum:
+                in_enum_constants = True
             continue
 
         if not class_def_found:
             continue
+
+        # Enum: inclui constantes literalmente para o LLM não inventar valores
+        if is_enum and in_enum_constants:
+            if re.match(r'^[A-Z][A-Z0-9_]+', stripped):
+                header_lines.append("    " + stripped)
+                if stripped.endswith(';'):
+                    in_enum_constants = False
+                continue
+            # Linha sem padrão de constante encerra a seção
+            if not stripped.startswith(('/', '*', '@')):
+                in_enum_constants = False
 
         # Apenas membros públicos/protegidos com parênteses (métodos)
         if ('public ' in stripped or 'protected ' in stripped) and '(' in stripped:
@@ -136,5 +175,7 @@ def _extract_simplified_header(code: str, full_name: str) -> str:
                 signature += ";"
             header_lines.append("    " + signature)
 
+    if constructor_hint:
+        header_lines.append(constructor_hint)
     header_lines.append("}")
     return f"// Class: {full_name}\n" + "\n".join(header_lines)

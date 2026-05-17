@@ -34,6 +34,20 @@ repos/
 phases/reports/
 report_*.json
 report_*.md
+REFACTORING_REPORT.md
+
+# IDE / editor
+.vscode/
+.idea/
+*.iml
+
+# Test cache
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Claude Code internal (session memory, not part of the project)
+.claude/
 
 # OS generated files
 .DS_Store

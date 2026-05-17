@@ -1,0 +1,11 @@
+skill: flow-refactor
+description: Refatora por fluxo de endpoint — controller→service→repository com contexto completo da cadeia e repair loop comportamental
+tool: flow
+skill_name: java-flow-refactor
+skill_section: LLM INSTRUCTIONS
+review_criteria: |
+  O diff deve melhorar a qualidade de código (guard clauses, extração de métodos, controller lean, DIP)
+  preservando o contrato HTTP de todos os endpoints afetados.
+  REJEITE se: assinaturas de métodos públicos alteradas, mapeamentos HTTP modificados (@GetMapping, path),
+  novos imports de classes inexistentes no projeto, comportamento em runtime diferente,
+  ou se arquivos [SHARED] tiveram suas assinaturas alteradas.

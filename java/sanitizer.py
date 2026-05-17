@@ -35,16 +35,20 @@ _EXTERNAL_ANNOTATIONS = {
 def run_sanitization(repo_path: str):
     log("Iniciando sanitização final do projeto...", "PHASE")
 
-    java_files = []
+    main_files = []
+    all_files  = []  # main + test — para busca de uso
     for root, _, files in os.walk(repo_path):
-        if "src/main/java" not in root:
-            continue
+        is_main = "src/main/java" in root
+        is_test = "src/test/java" in root
         for f in files:
             if f.endswith(".java"):
-                java_files.append(os.path.join(root, f))
+                path = os.path.join(root, f)
+                all_files.append(path)
+                if is_main:
+                    main_files.append(path)
 
-    for file in java_files:
-        _sanitize_file(file, java_files, repo_path)
+    for file in main_files:
+        _sanitize_file(file, all_files, repo_path)
 
     log("Sanitização concluída.", "OK")
 
@@ -109,15 +113,18 @@ def _has_external_annotation(content: str, method_name: str) -> bool:
 
 
 def _is_used_in_project(method: str, file_path: str, all_files: list) -> bool:
-    """Retorna True se o método for chamado em qualquer arquivo do projeto."""
+    """Retorna True se o método for chamado ou referenciado em qualquer arquivo do projeto."""
     call_pattern = re.compile(rf'\b{re.escape(method)}\s*\(')
+    ref_pattern  = re.compile(rf'::{re.escape(method)}\b')  # method references (Class::method)
     for other_file in all_files:
         other_content = read_file(other_file)
         if other_file == file_path:
             # No próprio arquivo: precisa aparecer mais de uma vez (declaração não conta)
             if len(call_pattern.findall(other_content)) > 1:
                 return True
+            if ref_pattern.search(other_content):
+                return True
         else:
-            if call_pattern.search(other_content):
+            if call_pattern.search(other_content) or ref_pattern.search(other_content):
                 return True
     return False

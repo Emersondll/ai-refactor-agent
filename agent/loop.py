@@ -9,7 +9,22 @@ from java.llm_reviewer import review_diff
 from agent.observation import build_observation
 from agent.planner import call_planner
 from agent.skill_catalog import load_skill_config, is_reactive, is_terminal
-from config import AGENT_MAX_CYCLES, MODEL_SOLID
+from config import AGENT_MAX_CYCLES, MODEL_REVIEWER as MODEL_SOLID
+
+
+def _dispatch_skill(skill_config: dict, repo_path: str, cache) -> tuple[bool, str]:
+    """Despacha a skill para o runner correto baseado no campo 'tool' do config."""
+    tool = skill_config.get("tool", "community")
+    if tool == "llm":
+        from java.llm_runner import run_skill as _run_llm
+        return _run_llm(skill_config, repo_path, cache)
+    if tool == "flow":
+        from java.flow_runner import run_skill as _run_flow
+        return _run_flow(skill_config, repo_path, cache)
+    if tool == "flow-dry":
+        from java.flow_runner import dry_check as _dry_check
+        return _dry_check(skill_config, repo_path)
+    return run_skill(skill_config, repo_path)
 
 
 def run_agent_loop(repo_path: str, reporter: PhaseReporter,
@@ -20,7 +35,7 @@ def run_agent_loop(repo_path: str, reporter: PhaseReporter,
     last_build_error: str | None = None
 
     log("=" * 60, "PHASE")
-    log("AGENT MODE — Plan-then-Execute Loop (Community Tools)", "PHASE")
+    log("AGENT MODE — Plan-then-Execute Loop (Community + LLM)", "PHASE")
     log(f"Max cycles: {AGENT_MAX_CYCLES}", "PHASE")
     log("=" * 60, "PHASE")
 
@@ -71,10 +86,13 @@ def run_agent_loop(repo_path: str, reporter: PhaseReporter,
                 log(f"  [Agent] Unknown or missing skill '{skill}' — skipping", "WARN")
                 continue
 
-            changed, diff = run_skill(skill_config, repo_path)
+            tool = skill_config.get("tool", "community")
+            exec_logger.log_phase_start(skill, f"Agent cycle {cycle} — tool={tool}")
+
+            changed, diff = _dispatch_skill(skill_config, repo_path, cache)
             if not changed:
                 log(f"  [Agent] [{skill}] no changes — skipping", "INFO")
-                cache.mark_phase_done(skill)
+                cache.mark_phase_done(skill, skill)
                 continue
 
             verdict = review_diff(diff, skill_config.get("review_criteria", ""), MODEL_SOLID)
@@ -82,8 +100,9 @@ def run_agent_loop(repo_path: str, reporter: PhaseReporter,
 
             if verdict == "REJECT":
                 _git_restore(repo_path)
-                cache.mark_phase_done(skill)
+                cache.mark_phase_done(skill, skill)
                 log(f"  [Agent] [{skill}] reverted (REJECT)", "WARN")
+                exec_logger.log_file_reverted(skill, skill, "REVIEWER_REJECT")
                 continue
 
             actions_accepted += 1
@@ -93,11 +112,13 @@ def run_agent_loop(repo_path: str, reporter: PhaseReporter,
                 log(f"  [Agent] Build broke after [{skill}] — reverting", "WARN")
                 _git_restore(repo_path)
                 build_broke_this_cycle = True
+                exec_logger.log_compilation_failed(skill, skill)
                 break
             else:
                 last_build_error = None
-                cache.mark_phase_done(skill)
+                cache.mark_phase_done(skill, skill)
                 log(f"  [Agent] [{skill}] accepted and committed to build", "OK")
+                exec_logger.log_file_accepted(skill, skill, f"+{tool}")
 
         if build_broke_this_cycle or actions_accepted == 0:
             consecutive_no_progress += 1

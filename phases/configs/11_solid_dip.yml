@@ -1,0 +1,17 @@
+skill: solid-dip
+description: Aplica DIP — substitui instanciação direta (new ConcreteService) por injeção via construtor
+tool: llm
+method_level: false
+class_level: true
+skill_name: java-solid-dip
+skill_section: LLM INSTRUCTIONS
+detect_pattern: concrete_new
+min_lines: 0
+max_agent: standard
+skip_dep_context: true
+skip_compression: true
+review_criteria: |
+  O diff deve APENAS substituir instanciação direta de dependências por injeção de construtor.
+  REJEITE se: lógica de negócio alterada, interfaces inventadas sem estar no dep_context,
+  assinaturas de métodos públicos modificadas, ou comportamento em runtime diferente.
+  APROVE se: new ConcreteService() foi substituído por injeção e o campo é private final.

@@ -10,6 +10,12 @@ _PHASE_SKILLS: dict[str, str] = {
     "simplify-code":      "phases/configs/06_simplify-code.yml",
     "modernize-syntax":   "phases/configs/07_modernize-syntax.yml",
     "static-analysis":    "phases/configs/08_static-analysis.yml",
+    "guard-clauses":      "phases/configs/09_guard_clauses.yml",
+    "method-extraction":  "phases/configs/10_method_extraction.yml",
+    "solid-dip":          "phases/configs/11_solid_dip.yml",
+    "controller-lean":    "phases/configs/12_controller_lean.yml",
+    "flow-refactor":      "phases/configs/13_flow_refactor.yml",
+    "dry-check":          "phases/configs/14_dry_check.yml",
 }
 
 _REACTIVE_SKILLS: set[str] = {"fix-build", "skip-file", "analyze-state"}
@@ -23,6 +29,12 @@ SKILL_DESCRIPTIONS: dict[str, str] = {
     "simplify-code":      "Simplify boolean expressions, returns, and unnecessary parentheses",
     "modernize-syntax":   "Modernize to Java 17+ idioms: diamond operator, isEmpty, no double-brace",
     "static-analysis":    "Run full OpenRewrite CommonStaticAnalysis suite",
+    "guard-clauses":      "Replace nested if-else (depth >= 3) with early return guard clauses (LLM)",
+    "method-extraction":  "Extract long methods (> 30 lines) into smaller focused private methods (LLM)",
+    "solid-dip":          "Replace direct instantiation (new ConcreteX()) with constructor injection (LLM)",
+    "controller-lean":    "Move business logic out of @RestController into service layer (LLM)",
+    "flow-refactor":      "Refactor full endpoint flow: controller→service→repository chain (LLM)",
+    "dry-check":          "Detect and extract duplicated code blocks to utility classes (LLM)",
     "fix-build":          "REACTIVE: Attempt to repair current build failure (only when red)",
     "skip-file":          "REACTIVE: Mark file as unprocessable this run",
     "done":               "TERMINAL: No more improvements available — stop the loop",

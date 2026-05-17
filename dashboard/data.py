@@ -31,6 +31,11 @@ def parse_logs():
 # Fonte primária: execution.jsonl (tem campo "file" por evento)
 # ---------------------------------------------------------------------------
 
+def _base_file(raw: str) -> str:
+    """S1: descarta ::metodo_assinatura — eventos de método sobem para a classe pai."""
+    return raw.split("::")[0] if raw else raw
+
+
 def _parse_jsonl():
     with open(JSONL_FILE, "r") as f:
         entries = []
@@ -68,6 +73,7 @@ def _parse_jsonl():
     file_start_times = {}   # filename → datetime
     durations = []          # segundos por arquivo aceito
     last_file_seen = "Aguardando..."
+    is_complete = False     # S2: True quando PIPELINE_COMPLETE detectado
 
     for entry in session:
         ts_str = entry.get("timestamp", "")
@@ -80,9 +86,12 @@ def _parse_jsonl():
             stats["start_time"] = ts_str
         stats["last_update"] = ts_str
 
-        event    = entry.get("event", "")
-        filename = entry.get("file", "")
-        message  = entry.get("message", "")
+        event       = entry.get("event", "")
+        raw_file    = entry.get("file", "")
+        filename    = _base_file(raw_file)   # S1: normalizado sem ::método
+        message     = entry.get("message", "")
+        # S5: detalhe completo para tooltip (inclui assinatura do método se houver)
+        detail      = raw_file if raw_file else message
 
         if event == "FILES_TOTAL":
             total = entry.get("count", 0)
@@ -93,7 +102,8 @@ def _parse_jsonl():
             for fname in entry.get("files", []):
                 if fname not in seen_files:
                     seen_files.add(fname)
-                    steps.append({"name": fname, "status": "pending", "time": ts_str})
+                    steps.append({"name": fname, "status": "pending",
+                                  "time": ts_str, "detail": fname})
 
         elif event == "COVERAGE":
             m = re.search(r"(\d+\.\d+)%", message)
@@ -104,6 +114,15 @@ def _parse_jsonl():
 
         elif event == "PHASE_START":
             stats["phase"] = entry.get("phase", message)
+            phase_id = entry.get("phase", "")
+            # S2: detecta encerramento do pipeline
+            if phase_id == "PIPELINE_COMPLETE":
+                is_complete = True
+            # C2: pipeline encerrado — limpa qualquer "processing" restante
+            if phase_id in ("PIPELINE_COMPLETE", "COMMIT_PUSH_FAILED"):
+                for s in steps:
+                    if s["status"] == "processing":
+                        s["status"] = "pending"
 
         elif event == "FILE_START":
             last_file_seen = filename
@@ -111,13 +130,14 @@ def _parse_jsonl():
             if filename not in seen_files:
                 seen_files.add(filename)
                 stats["files_total"] += 1
-                steps.append({"name": filename, "status": "processing", "time": ts_str})
+                steps.append({"name": filename, "status": "processing",
+                               "time": ts_str, "detail": detail})
             else:
-                # retry: marca como processando novamente
                 for s in steps:
                     if s["name"] == filename:
                         s["status"] = "processing"
                         s["time"] = ts_str
+                        s["detail"] = detail   # S5: atualiza com método atual
                         break
 
         elif event == "FILE_ACCEPTED":
@@ -128,6 +148,7 @@ def _parse_jsonl():
                 if s["name"] == filename and s["status"] == "processing":
                     s["status"] = "completed"
                     s["time"] = ts_str
+                    s["detail"] = detail
                     if filename in file_start_times:
                         delta = (ts - file_start_times[filename]).total_seconds()
                         if delta > 0:
@@ -139,6 +160,7 @@ def _parse_jsonl():
                 if s["name"] == filename and s["status"] == "processing":
                     s["status"] = "failed"
                     s["time"] = ts_str
+                    s["detail"] = detail
                     if filename in file_start_times:
                         delta = (ts - file_start_times[filename]).total_seconds()
                         if delta > 0:
@@ -146,27 +168,35 @@ def _parse_jsonl():
                     break
 
         elif event == "FILE_SKIPPED":
+            found = False
             for s in steps:
-                if s["name"] == filename and s["status"] == "processing":
+                if s["name"] == filename and s["status"] in ("pending", "processing"):
                     s["status"] = "skipped"
                     s["time"] = ts_str
+                    s["detail"] = detail
+                    found = True
                     break
+            if not found and filename and filename not in seen_files:
+                seen_files.add(filename)
+                steps.append({"name": filename, "status": "skipped",
+                               "time": ts_str, "detail": detail})
 
     if durations:
         stats["avg_seconds_per_file"] = sum(durations) / len(durations)
 
     stats["files_total"] = max(stats["files_total"], stats["files_completed"])
 
-    active = next(
+    jsonl_active = next(
         (s["name"] for s in reversed(steps) if s["status"] == "processing"),
-        last_file_seen,
+        None,
     )
+    active = jsonl_active or last_file_seen
 
     active_elapsed = 0.0
     if active in file_start_times:
         active_elapsed = (datetime.now() - file_start_times[active]).total_seconds()
 
-    _write_output(stats, steps, active, active_elapsed)
+    _write_output(stats, steps, active, active_elapsed, is_complete)
 
 
 # ---------------------------------------------------------------------------
@@ -273,7 +303,7 @@ def _parse_text():
     _write_output(stats, steps, active, active_elapsed)
 
 
-def _write_output(stats: dict, steps: list, active_file: str, active_elapsed: float = 0.0) -> None:
+def _write_output(stats: dict, steps: list, active_file: str, active_elapsed: float = 0.0, is_complete: bool = False) -> None:
     import sys
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     try:
@@ -282,9 +312,15 @@ def _write_output(stats: dict, steps: list, active_file: str, active_elapsed: fl
     except Exception:
         live = {}
 
+    # live_state.current_file é preenchido por llm_runner e flow_runner
+    # quando o JSONL não tem FILE_START ativo (fases LLM não emitem esse evento)
+    display_file = active_file or live.get("current_file", "") or "Aguardando..."
+
     data = {
+        "heartbeat": datetime.now().isoformat(),
+        "is_complete": is_complete,
         "stats": stats,
-        "current_file": active_file,
+        "current_file": display_file,
         "current_file_elapsed": round(active_elapsed),
         "cpu_percent": _cpu_percent(),
         "current_model": live.get("current_model", ""),

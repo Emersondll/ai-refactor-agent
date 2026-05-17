@@ -53,6 +53,25 @@ class Cache:
     def mark_phase_done(self, file_path: str, phase_name: str) -> None:
         self._phase_done.setdefault(file_path, set()).add(phase_name)
 
+    # --- Method-level tracking (chave: file_path#method_cache_key) ---
+
+    def is_method_done(self, file_path: str, method_key: str, phase_name: str) -> bool:
+        key = f"{file_path}#{method_key}"
+        return phase_name in self._phase_done.get(key, set())
+
+    def mark_method_done(self, file_path: str, method_key: str, phase_name: str) -> None:
+        key = f"{file_path}#{method_key}"
+        self._phase_done.setdefault(key, set()).add(phase_name)
+
+    def done_method_keys(self, file_path: str, phase_name: str) -> set[str]:
+        """Retorna todas as chaves de método já processadas para um arquivo/fase."""
+        prefix = f"{file_path}#"
+        return {
+            k[len(prefix):]
+            for k, phases in self._phase_done.items()
+            if k.startswith(prefix) and phase_name in phases
+        }
+
     # --- Project dictionary (in-memory + disco) ---
 
     def get_project_dict(self) -> Optional[str]:

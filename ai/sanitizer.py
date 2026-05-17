@@ -194,6 +194,52 @@ def clean_output(text: str) -> str | None:
     return None
 
 
+def _is_brace_balanced(code: str) -> bool:
+    """Rejeita output truncado antes do Maven — conta { vs } fora de strings/comentários."""
+    depth = 0
+    in_string = False
+    in_char = False
+    in_line_comment = False
+    in_block_comment = False
+    i = 0
+    while i < len(code):
+        c = code[i]
+        if in_line_comment:
+            if c == '\n':
+                in_line_comment = False
+        elif in_block_comment:
+            if c == '*' and i + 1 < len(code) and code[i + 1] == '/':
+                in_block_comment = False
+                i += 1
+        elif in_string:
+            if c == '\\':
+                i += 1
+            elif c == '"':
+                in_string = False
+        elif in_char:
+            if c == '\\':
+                i += 1
+            elif c == "'":
+                in_char = False
+        else:
+            if c == '/' and i + 1 < len(code) and code[i + 1] == '/':
+                in_line_comment = True
+                i += 1
+            elif c == '/' and i + 1 < len(code) and code[i + 1] == '*':
+                in_block_comment = True
+                i += 1
+            elif c == '"':
+                in_string = True
+            elif c == "'":
+                in_char = True
+            elif c == '{':
+                depth += 1
+            elif c == '}':
+                depth -= 1
+        i += 1
+    return depth == 0
+
+
 def _finalize(code: str) -> str | None:
     code = sanitize_java_code(code)
     code = unescape_html_entities(code)
@@ -201,7 +247,11 @@ def _finalize(code: str) -> str | None:
     code = fix_broken_generics(code)
     code = fix_common_syntax_issues(code)
     code = _fix_missing_semicolons(code)
-    return code.strip() if code.strip() else None
+    if not code.strip():
+        return None
+    if not _is_brace_balanced(code):
+        return None  # output truncado — rejeita antes do Maven
+    return code.strip()
 
 
 def _fix_missing_semicolons(code: str) -> str:

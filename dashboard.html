@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Refactor Agent - Dashboard Premium</title>
+    <title>AI Refactor Agent - Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700;800&display=swap" rel="stylesheet">
     <style>
         :root {
             --bg-color: #0a0a0c;
@@ -11,10 +12,14 @@
             --accent-green: #00ff88;
             --accent-blue: #00d4ff;
             --accent-red: #ff4d4d;
+            --accent-purple: #b57aff;
+            --accent-orange: #ff8c42;
             --text-color: #e0e0e0;
             --glass-bg: rgba(255, 255, 255, 0.05);
             --glass-border: rgba(255, 255, 255, 0.1);
         }
+
+        * { box-sizing: border-box; }
 
         body {
             background-color: var(--bg-color);
@@ -29,7 +34,7 @@
 
         header {
             width: 100%;
-            padding: 3rem 0;
+            padding: 2.5rem 0 1.5rem;
             text-align: center;
             background: radial-gradient(circle at center, rgba(0,212,255,0.15) 0%, transparent 70%);
         }
@@ -44,6 +49,140 @@
             -webkit-text-fill-color: transparent;
         }
 
+        /* ── PIPELINE SECTION ─────────────────────────────────── */
+        .pipeline-section {
+            width: 95%;
+            max-width: 1200px;
+            margin: 1.5rem 0 2.5rem;
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 0.75rem;
+            align-items: start;
+        }
+
+        .pipeline-group {
+            display: flex;
+            flex-direction: column;
+            border-radius: 14px;
+            overflow: hidden;
+            border: 1px solid var(--glass-border);
+        }
+
+        .group-header {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.55rem 0.9rem;
+            font-size: 0.62rem;
+            font-weight: 700;
+            letter-spacing: 1.3px;
+            text-transform: uppercase;
+        }
+
+        .group-header .group-icon { font-size: 0.85rem; }
+
+        .group-pills {
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+            padding: 0.7rem 0.6rem;
+            background: rgba(255,255,255,0.02);
+        }
+
+        .header-infra     { background: rgba(0,212,255,0.13);   color: var(--accent-blue);   border-bottom: 1px solid rgba(0,212,255,0.2); }
+        .header-community { background: rgba(0,255,136,0.11);   color: var(--accent-green);  border-bottom: 1px solid rgba(0,255,136,0.2); }
+        .header-llm-class { background: rgba(181,122,255,0.13); color: var(--accent-purple); border-bottom: 1px solid rgba(181,122,255,0.2); }
+        .header-llm-flow  { background: rgba(255,140,66,0.13);  color: var(--accent-orange); border-bottom: 1px solid rgba(255,140,66,0.2); }
+        .header-finish    { background: rgba(255,204,51,0.11);  color: var(--accent-gold);   border-bottom: 1px solid rgba(255,204,51,0.2); }
+
+        /* ── PHASE ITEMS (rows inside group) ─────────────────── */
+        .phase-item {
+            position: relative;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.4rem 0.6rem;
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.07);
+            border-radius: 8px;
+            font-size: 0.73rem;
+            font-weight: 500;
+            opacity: 0.4;
+            transition: all 0.3s ease;
+            cursor: default;
+            user-select: none;
+            width: 100%;
+        }
+
+        .phase-num {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 20px;
+            height: 20px;
+            border-radius: 6px;
+            font-size: 0.58rem;
+            font-weight: 700;
+            background: rgba(255,255,255,0.08);
+            flex-shrink: 0;
+        }
+
+        .phase-item.done {
+            opacity: 1;
+            border-color: rgba(0,255,136,0.4);
+            background: rgba(0,255,136,0.06);
+            color: var(--accent-green);
+        }
+        .phase-item.done .phase-num {
+            background: rgba(0,255,136,0.2);
+            color: var(--accent-green);
+        }
+
+        .phase-item.active {
+            opacity: 1;
+            border-color: rgba(255,204,51,0.6);
+            background: rgba(255,204,51,0.1);
+            color: var(--accent-gold);
+            box-shadow: 0 0 10px rgba(255,204,51,0.15);
+            animation: rowPulse 2s infinite;
+        }
+        .phase-item.active .phase-num {
+            background: rgba(255,204,51,0.25);
+            color: var(--accent-gold);
+        }
+
+        @keyframes rowPulse {
+            0%,100% { border-color: rgba(255,204,51,0.3); }
+            50%      { border-color: rgba(255,204,51,0.7); }
+        }
+
+        /* ── TOOLTIP ──────────────────────────────────────────── */
+        .phase-item::after {
+            content: attr(data-tip);
+            position: absolute;
+            bottom: calc(100% + 8px);
+            left: 0;
+            background: rgba(8, 8, 18, 0.97);
+            border: 1px solid rgba(0,212,255,0.2);
+            color: #d0d0d0;
+            padding: 0.6rem 0.85rem;
+            border-radius: 10px;
+            font-size: 0.71rem;
+            line-height: 1.55;
+            width: 220px;
+            white-space: normal;
+            z-index: 500;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.18s ease;
+            text-align: left;
+            font-weight: 400;
+            backdrop-filter: blur(12px);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+        }
+        .phase-item:hover::after { opacity: 1; }
+
+        /* ── STATS ────────────────────────────────────────────── */
         .stats-container {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
@@ -62,53 +201,13 @@
             text-align: center;
             transition: transform 0.3s ease;
         }
-
         .stat-card:hover { transform: translateY(-5px); }
 
         .stat-value { font-size: 2.2rem; font-weight: 800; color: var(--accent-blue); }
         .stat-label { font-size: 0.9rem; font-weight: 300; opacity: 0.7; margin-top: 0.5rem; text-transform: uppercase; letter-spacing: 1px; }
 
-        .phase-list {
-            display: flex;
-            justify-content: center;
-            gap: 1rem;
-            margin-bottom: 3rem;
-            flex-wrap: wrap;
-        }
-
-        .phase-item {
-            padding: 0.8rem 1.5rem;
-            background: var(--glass-bg);
-            border: 2px solid var(--glass-border);
-            border-radius: 50px;
-            font-size: 0.8rem;
-            opacity: 0.6;
-            transition: all 0.3s ease;
-        }
-
-        .phase-item.active {
-            opacity: 1;
-            border-color: var(--accent-gold);
-            background: rgba(255, 204, 51, 0.1);
-            color: var(--accent-gold);
-            box-shadow: 0 0 15px rgba(255, 204, 51, 0.2);
-            animation: borderPulse 2s infinite;
-        }
-
-        .phase-item.done {
-            opacity: 1;
-            border-color: var(--accent-green);
-            background: rgba(0, 255, 136, 0.05);
-            color: var(--accent-green);
-        }
-
-        @keyframes borderPulse {
-            0% { border-color: rgba(255, 204, 51, 0.4); }
-            50% { border-color: var(--accent-gold); }
-            100% { border-color: rgba(255, 204, 51, 0.4); }
-        }
-
-        .honeycomb-section { position: relative; margin: 4rem 0; }
+        /* ── HONEYCOMB ────────────────────────────────────────── */
+        .honeycomb-section { position: relative; margin: 2rem 0; }
         .honeycomb {
             display: flex;
             flex-wrap: wrap;
@@ -130,7 +229,6 @@
             border-left: solid 2px var(--glass-border);
             border-right: solid 2px var(--glass-border);
         }
-
         .hex::before, .hex::after {
             content: "";
             position: absolute;
@@ -141,23 +239,22 @@
             left: 21.43px;
             z-index: -1;
         }
-
         .hex::before { top: -56.57px; border-top: solid 2.82px var(--glass-border); border-right: solid 2.82px var(--glass-border); }
-        .hex::after { bottom: -56.57px; border-bottom: solid 2.82px var(--glass-border); border-left: solid 2.82px var(--glass-border); }
+        .hex::after  { bottom: -56.57px; border-bottom: solid 2.82px var(--glass-border); border-left: solid 2.82px var(--glass-border); }
+        .hex span    { font-size: 0.75rem; text-align: center; padding: 12px; z-index: 10; font-weight: 500; }
 
-        .hex span { font-size: 0.75rem; text-align: center; padding: 12px; z-index: 10; font-weight: 500; }
-
-        .hex.completed { background-color: rgba(0, 255, 136, 0.15); border-color: var(--accent-green); box-shadow: 0 0 25px rgba(0, 255, 136, 0.2); }
-        .hex.processing { background-color: rgba(255, 204, 51, 0.15); border-color: var(--accent-gold); animation: glow 2s infinite; }
-        .hex.failed { background-color: rgba(255, 77, 77, 0.15); border-color: var(--accent-red); }
-        .hex.skipped { background-color: rgba(128, 128, 128, 0.15); border-color: rgba(128,128,128,0.5); opacity: 0.6; }
-        .hex.pending { background-color: var(--glass-bg); border-color: var(--glass-border); opacity: 0.35; }
+        .hex.completed  { background-color: rgba(0,255,136,0.15);  border-color: var(--accent-green);  box-shadow: 0 0 25px rgba(0,255,136,0.2); }
+        .hex.processing { background-color: rgba(255,204,51,0.15); border-color: var(--accent-gold);   animation: glow 2s infinite; }
+        .hex.failed     { background-color: rgba(255,77,77,0.15);  border-color: var(--accent-red); }
+        .hex.skipped    { background-color: rgba(255,140,66,0.12);  border-color: rgba(255,140,66,0.6); box-shadow: 0 0 10px rgba(255,140,66,0.2); }
+        .hex.pending    { background-color: var(--glass-bg);        border-color: var(--glass-border); opacity: 0.35; }
 
         @keyframes glow {
-            0%, 100% { box-shadow: 0 0 5px var(--accent-gold); }
-            50% { box-shadow: 0 0 25px var(--accent-gold); }
+            0%,100% { box-shadow: 0 0 5px var(--accent-gold); }
+            50%      { box-shadow: 0 0 25px var(--accent-gold); }
         }
 
+        /* ── LEGEND ───────────────────────────────────────────── */
         .legend {
             display: flex;
             gap: 2rem;
@@ -166,237 +263,441 @@
             background: var(--glass-bg);
             border-radius: 15px;
             border: 1px solid var(--glass-border);
+            flex-wrap: wrap;
+            justify-content: center;
         }
-
         .legend-item { display: flex; align-items: center; gap: 0.8rem; font-size: 0.85rem; }
-        .dot { width: 12px; height: 12px; border-radius: 50%; }
+        .dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
 
+        /* ── MISC ─────────────────────────────────────────────── */
         .footer { margin-top: 4rem; padding-bottom: 2rem; opacity: 0.4; font-size: 0.8rem; letter-spacing: 1px; }
 
-        .cpu-bar-track {
-            width: 100%; height: 8px; background: rgba(255,255,255,0.1);
-            border-radius: 4px; margin: 0.8rem 0 0.4rem;
+        #offline-banner {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            z-index: 9999;
+            background: rgba(255,77,77,0.15);
+            border-bottom: 2px solid var(--accent-red);
+            backdrop-filter: blur(8px);
+            text-align: center;
+            padding: 0.9rem 1rem;
+            font-size: 0.95rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            color: var(--accent-red);
         }
-        .cpu-bar {
-            height: 100%; width: 0%; border-radius: 4px;
-            background: var(--accent-blue);
-            transition: width 0.6s ease, background 0.4s ease;
-        }
+        #offline-banner.visible { display: block; }
+
+        .cpu-bar-track { width: 100%; height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; margin: 0.8rem 0 0.4rem; }
+        .cpu-bar       { height: 100%; width: 0%; border-radius: 4px; background: var(--accent-blue); transition: width 0.6s ease, background 0.4s ease; }
+
         #lock-card.lock-warn  { border-color: var(--accent-gold) !important; background: rgba(255,204,51,0.07) !important; }
         #lock-card.lock-alert { border-color: var(--accent-red)  !important; background: rgba(255,77,77,0.1)   !important; animation: borderPulse 1.5s infinite; }
-
     </style>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700;800&display=swap" rel="stylesheet">
 </head>
 <body>
 
-    <header>
-        <h1>AI Refactor Orchestrator</h1>
-    </header>
+<div id="offline-banner">&#9888; APLICAÇÃO OFFLINE — dados da última execução (atualização pausada)</div>
 
-    <div class="phase-list" id="phase-list">
-        <div class="phase-item" id="phase-GIT_BRANCH_CREATED">1. Branching</div>
-        <div class="phase-item" id="phase-HEALTH_CHECK">2. Health Check</div>
-        <div class="phase-item" id="phase-AUDIT_COVERAGE">3. Auditoria</div>
-        <div class="phase-item" id="phase-initial_coverage_fix">4. Cobertura (90%)</div>
-        <div class="phase-item" id="phase-07_solid.md">5. Refatoração</div>
-        <div class="phase-item" id="phase-SANITIZATION">6. Sanitização</div>
-        <div class="phase-item" id="phase-FINAL_VALIDATION">7. Validação Final</div>
-        <div class="phase-item" id="phase-COMMIT_PUSH">8. Persistência Final</div>
+<header>
+    <h1>AI Refactor Orchestrator</h1>
+    <div style="margin-top:0.8rem;">
+        <a href="report.html"
+           style="color:#00d4ff; text-decoration:none; font-size:0.85rem;
+                  padding:0.35rem 1rem; border:1px solid rgba(0,212,255,0.3);
+                  border-radius:20px; background:rgba(0,212,255,0.07);
+                  transition:background 0.2s;"
+           onmouseover="this.style.background='rgba(0,212,255,0.15)'"
+           onmouseout="this.style.background='rgba(0,212,255,0.07)'">
+            Ver Relatório de Refatoração
+        </a>
     </div>
+</header>
 
-    <div class="stats-container">
-        <div class="stat-card">
-            <div id="coverage" class="stat-value">0.00%</div>
-            <div class="stat-label">Cobertura Global de Testes</div>
-        </div>
-        <div class="stat-card">
-            <div id="etc" class="stat-value">00:00:00</div>
-            <div class="stat-label">Tempo Restante (Est.)</div>
-        </div>
-        <div class="stat-card">
-            <div id="progress" class="stat-value">0/0</div>
-            <div class="stat-label">Classes Modernizadas</div>
-        </div>
+<!-- ── PIPELINE COMPLETO ──────────────────────────────────────────── -->
+<div class="pipeline-section" id="phase-list">
 
-        <!-- CPU -->
-        <div class="stat-card" id="cpu-card">
-            <div id="cpu-value" class="stat-value">--%</div>
-            <div class="cpu-bar-track">
-                <div id="cpu-bar" class="cpu-bar"></div>
+    <!-- Bloco 1: Infraestrutura -->
+    <div class="pipeline-group">
+        <div class="group-header header-infra">
+            <span class="group-icon">⚙️</span> Infraestrutura
+        </div>
+        <div class="group-pills">
+            <div class="phase-item" id="phase-GIT_BRANCH_CREATED"
+                 data-tip="Cria branch refactor/ai-agent-automation isolada. Nunca altera o main — todo o trabalho ocorre nessa branch dedicada.">
+                <span class="phase-num">1</span> Branch
             </div>
-            <div class="stat-label">Uso de CPU</div>
-        </div>
-
-        <!-- Tempo da classe ativa + Modelo + Skill -->
-        <div class="stat-card" id="lock-card" style="grid-column: span 2;">
-            <div style="display:flex; align-items:baseline; gap:1rem; justify-content:center; flex-wrap:wrap;">
-                <div id="active-timer" class="stat-value">00:00</div>
-                <div id="current-model-badge" style="font-size:0.85rem; padding:0.3rem 0.8rem; border-radius:20px; background:rgba(0,212,255,0.12); border:1px solid rgba(0,212,255,0.3); color:var(--accent-blue); font-weight:600;">--</div>
+            <div class="phase-item" id="phase-HEALTH_CHECK"
+                 data-tip="Executa mvn test no código original para garantir que os testes já passam antes de qualquer mudança — pré-condição obrigatória.">
+                <span class="phase-num">2</span> Health Check
             </div>
-            <div id="active-skill-label" style="margin-top:0.5rem; font-size:0.8rem; color:var(--accent-gold); min-height:1.2em; font-weight:500; letter-spacing:0.5px;"></div>
-            <div id="lock-status" class="stat-label" style="margin-top:0.3rem;">Tempo da Classe Ativa</div>
+            <div class="phase-item" id="phase-AUDIT_COVERAGE"
+                 data-tip="Mede a cobertura atual com JaCoCo. Determina se a geração de testes é necessária antes de iniciar a refatoração.">
+                <span class="phase-num">3</span> Auditoria
+            </div>
+            <div class="phase-item" id="phase-initial_coverage_fix"
+                 data-tip="Se cobertura < 90%: gera testes JUnit 5 + Mockito com LLM (gemma4) por classe. Gate: só avança para refatoração com ≥ 90%.">
+                <span class="phase-num">4</span> Cobertura 90%
+            </div>
         </div>
+    </div>
 
-        <!-- Arquivo em atuação -->
-        <div class="stat-card" style="grid-column: span 3; border-color: var(--accent-gold); background: rgba(255, 204, 51, 0.05);">
-            <div id="current-file" class="stat-value" style="font-size: 1.4rem;">Aguardando...</div>
-            <div class="stat-label">Arquivo em Atuação no Momento</div>
+    <!-- Bloco 2: Community Tools -->
+    <div class="pipeline-group">
+        <div class="group-header header-community">
+            <span class="group-icon">🔧</span> Community 01–08
+        </div>
+        <div class="group-pills">
+            <div class="phase-item" id="phase-clean-imports"
+                 data-tip="OpenRewrite: remove imports não utilizados e reorganiza a ordem de imports em todos os arquivos.">
+                <span class="phase-num">5</span> clean-imports
+            </div>
+            <div class="phase-item" id="phase-format"
+                 data-tip="Google Java Format: aplica formatação padrão — indentação, espaços entre operadores e quebras de linha (Google Java Style).">
+                <span class="phase-num">6</span> format
+            </div>
+            <div class="phase-item" id="phase-final-keywords"
+                 data-tip="OpenRewrite: adiciona final em variáveis locais e parâmetros que nunca são reatribuídos, promovendo imutabilidade.">
+                <span class="phase-num">7</span> final-keywords
+            </div>
+            <div class="phase-item" id="phase-naming-conventions"
+                 data-tip="OpenRewrite: corrige nomes fora do padrão Java — camelCase para variáveis/métodos, UPPER_SNAKE_CASE para constantes.">
+                <span class="phase-num">8</span> naming
+            </div>
+            <div class="phase-item" id="phase-dead-code"
+                 data-tip="OpenRewrite: detecta e remove métodos privados, variáveis locais e blocos de código nunca utilizados.">
+                <span class="phase-num">9</span> dead-code
+            </div>
+            <div class="phase-item" id="phase-simplify-code"
+                 data-tip="OpenRewrite: simplifica expressões booleanas, null checks verbosos e condicionais redundantes.">
+                <span class="phase-num">10</span> simplify
+            </div>
+            <div class="phase-item" id="phase-modernize-syntax"
+                 data-tip="OpenRewrite: migra para sintaxe moderna — switch expressions, var, text blocks, pattern matching (Java 14–21).">
+                <span class="phase-num">11</span> modernize
+            </div>
+            <div class="phase-item" id="phase-static-analysis"
+                 data-tip="OpenRewrite: aplica regras de PMD e SpotBugs — detecta potenciais bugs e code smells estáticos.">
+                <span class="phase-num">12</span> static-analysis
+            </div>
         </div>
     </div>
 
-    <div class="honeycomb-section">
-        <ul class="honeycomb" id="honeycomb"></ul>
+    <!-- Bloco 3: LLM por Classe -->
+    <div class="pipeline-group">
+        <div class="group-header header-llm-class">
+            <span class="group-icon">🧠</span> LLM Classe 09–12
+        </div>
+        <div class="group-pills">
+            <div class="phase-item" id="phase-guard-clauses"
+                 data-tip="LLM 7B: converte ifs aninhados (profundidade ≥ 3) em early return. Só processa arquivos com nested_if detectado.">
+                <span class="phase-num">13</span> guard-clauses
+            </div>
+            <div class="phase-item" id="phase-method-extraction"
+                 data-tip="LLM 7B: extrai métodos com mais de 30 linhas em helpers privados descritivos. Filtro: long_method.">
+                <span class="phase-num">14</span> method-extract
+            </div>
+            <div class="phase-item" id="phase-solid-dip"
+                 data-tip="LLM 7B: substitui new ConcreteService() por injeção via construtor (DIP do SOLID). Filtro: concrete_new.">
+                <span class="phase-num">15</span> solid-dip
+            </div>
+            <div class="phase-item" id="phase-controller-lean"
+                 data-tip="LLM 7B: remove lógica de negócio de @RestController, delegando ao Service (SRP). Filtro: controller_logic.">
+                <span class="phase-num">16</span> ctrl-lean
+            </div>
+        </div>
     </div>
 
-    <div class="legend">
-        <div class="legend-item"><div class="dot" style="background: var(--accent-green);"></div> Concluído</div>
-        <div class="legend-item"><div class="dot" style="background: var(--accent-gold);"></div> Em Processamento</div>
-        <div class="legend-item"><div class="dot" style="background: var(--accent-red);"></div> Falha / Autocura</div>
-        <div class="legend-item"><div class="dot" style="background: rgba(128,128,128,0.5);"></div> Pulado</div>
+    <!-- Bloco 4: LLM por Fluxo -->
+    <div class="pipeline-group">
+        <div class="group-header header-llm-flow">
+            <span class="group-icon">🔀</span> LLM Fluxo 13–14
+        </div>
+        <div class="group-pills">
+            <div class="phase-item" id="phase-flow-refactor"
+                 data-tip="LLM por endpoint: mapeia controller→service→repository e refatora cada arquivo com contexto do fluxo completo. Valida com mvn test por fluxo.">
+                <span class="phase-num">17</span> flow-refactor
+            </div>
+            <div class="phase-item" id="phase-dry-check"
+                 data-tip="LLM por grupo: detecta métodos repetidos em 2+ arquivos e extrai para classe utilitária static (princípio DRY). Valida com mvn test.">
+                <span class="phase-num">18</span> dry-check
+            </div>
+        </div>
     </div>
 
-    <div class="footer">
-        AI Refactor Orchestrator • Dinâmico • Refresco em 5s
+    <!-- Bloco 5: Finalização -->
+    <div class="pipeline-group">
+        <div class="group-header header-finish">
+            <span class="group-icon">✅</span> Finalização
+        </div>
+        <div class="group-pills">
+            <div class="phase-item" id="phase-SANITIZATION"
+                 data-tip="Remove imports soltos e código morto residual gerado pelas fases anteriores. Garante código limpo antes da validação final.">
+                <span class="phase-num">19</span> Sanitização
+            </div>
+            <div class="phase-item" id="phase-FINAL_VALIDATION"
+                 data-tip="mvn test + JaCoCo: confirma build OK e cobertura ≥ 90% mantida após todas as refatorações aplicadas.">
+                <span class="phase-num">20</span> Validação
+            </div>
+            <div class="phase-item" id="phase-COMMIT_PUSH"
+                 data-tip="git commit + push para branch refactor/ai-agent-automation. Retry automático com rebase em caso de non-fast-forward.">
+                <span class="phase-num">21</span> Commit + Push
+            </div>
+        </div>
     </div>
 
-    <script>
-        const phaseOrder = ['GIT_BRANCH_CREATED', 'HEALTH_CHECK', 'AUDIT_COVERAGE', 'initial_coverage_fix', '07_solid.md', 'SANITIZATION', 'FINAL_VALIDATION', 'COMMIT_PUSH'];
+</div>
+<!-- ── FIM PIPELINE ───────────────────────────────────────────────── -->
 
-        async function updateDashboard() {
-            try {
-                const response = await fetch('dashboard_status.json');
-                const data = await response.json();
-                const stats = data.stats;
-                const steps = data.steps;
+<div class="stats-container">
+    <div class="stat-card">
+        <div id="coverage" class="stat-value">0.00%</div>
+        <div class="stat-label">Cobertura Global de Testes</div>
+    </div>
+    <div class="stat-card">
+        <div id="etc" class="stat-value">00:00:00</div>
+        <div id="etc-label" class="stat-label">Tempo Restante (Est.)</div>
+    </div>
+    <div class="stat-card">
+        <div id="progress" class="stat-value">0/0</div>
+        <div class="stat-label">Classes Modernizadas</div>
+    </div>
 
-                // Update Stats
-                document.getElementById('coverage').textContent = stats.current_coverage.toFixed(2) + '%';
-                document.getElementById('progress').textContent = `${stats.files_completed}/${stats.files_total}`;
+    <!-- CPU -->
+    <div class="stat-card" id="cpu-card">
+        <div id="cpu-value" class="stat-value">--%</div>
+        <div class="cpu-bar-track">
+            <div id="cpu-bar" class="cpu-bar"></div>
+        </div>
+        <div class="stat-label">Uso de CPU</div>
+    </div>
 
-                // Update ETC — contador contínuo, não reinicia a cada refresh
+    <!-- Tempo da classe ativa + Modelo + Skill -->
+    <div class="stat-card" id="lock-card" style="grid-column: span 2;">
+        <div style="display:flex; align-items:baseline; gap:1rem; justify-content:center; flex-wrap:wrap;">
+            <div id="active-timer" class="stat-value">00:00</div>
+            <div id="current-model-badge" style="font-size:0.85rem; padding:0.3rem 0.8rem; border-radius:20px; background:rgba(0,212,255,0.12); border:1px solid rgba(0,212,255,0.3); color:var(--accent-blue); font-weight:600;">--</div>
+        </div>
+        <div id="active-skill-label" style="margin-top:0.5rem; font-size:0.8rem; color:var(--accent-gold); min-height:1.2em; font-weight:500; letter-spacing:0.5px;"></div>
+        <div id="lock-status" class="stat-label" style="margin-top:0.3rem;">Tempo da Classe Ativa</div>
+    </div>
+
+    <!-- Arquivo em atuação -->
+    <div class="stat-card" style="grid-column: span 3; border-color: var(--accent-gold); background: rgba(255,204,51,0.05);">
+        <div id="current-file" class="stat-value" style="font-size: 1.4rem;">Aguardando...</div>
+        <div class="stat-label">Arquivo em Atuação no Momento</div>
+    </div>
+</div>
+
+<div class="honeycomb-section">
+    <ul class="honeycomb" id="honeycomb"></ul>
+</div>
+
+<div class="legend">
+    <div class="legend-item"><div class="dot" style="background:var(--accent-green);"></div> Concluído</div>
+    <div class="legend-item"><div class="dot" style="background:var(--accent-gold);"></div> Em Processamento</div>
+    <div class="legend-item"><div class="dot" style="background:var(--accent-red);"></div> Falha / Autocura</div>
+    <div class="legend-item"><div class="dot" style="background:var(--accent-orange);"></div> Pulado (sem ação)</div>
+    <div class="legend-item"><div class="dot" style="background:rgba(255,255,255,0.15);"></div> Pendente</div>
+</div>
+
+<div class="footer">AI Refactor Orchestrator &bull; Refresco em 5s</div>
+
+<script>
+    // ── Mapeamento completo de todas as fases ─────────────────────────
+    // keys: strings que o stats.phase pode conter (toLowerCase) para ativar o item
+    const PHASES = [
+        { id: 'GIT_BRANCH_CREATED',   keys: ['git_branch_created', 'branching'] },
+        { id: 'HEALTH_CHECK',          keys: ['health_check'] },
+        { id: 'AUDIT_COVERAGE',        keys: ['audit_coverage'] },
+        { id: 'initial_coverage_fix',  keys: ['initial_coverage_fix', 'coverage_fix'] },
+        { id: 'clean-imports',         keys: ['clean-imports'] },
+        { id: 'format',                keys: ['format'] },
+        { id: 'final-keywords',        keys: ['final-keywords'] },
+        { id: 'naming-conventions',    keys: ['naming-conventions'] },
+        { id: 'dead-code',             keys: ['dead-code'] },
+        { id: 'simplify-code',         keys: ['simplify-code'] },
+        { id: 'modernize-syntax',      keys: ['modernize-syntax'] },
+        { id: 'static-analysis',       keys: ['static-analysis'] },
+        { id: 'guard-clauses',         keys: ['guard-clauses'] },
+        { id: 'method-extraction',     keys: ['method-extraction'] },
+        { id: 'solid-dip',             keys: ['solid-dip'] },
+        { id: 'controller-lean',       keys: ['controller-lean'] },
+        { id: 'flow-refactor',         keys: ['flow-refactor'] },
+        { id: 'dry-check',             keys: ['dry-check'] },
+        { id: 'SANITIZATION',          keys: ['sanitization'] },
+        { id: 'FINAL_VALIDATION',      keys: ['final_validation'] },
+        { id: 'COMMIT_PUSH',           keys: ['commit_push'] },
+    ];
+
+    const OFFLINE_THRESHOLD_MS = 30_000;
+
+    function setOffline(isOffline) {
+        document.getElementById('offline-banner').classList.toggle('visible', isOffline);
+    }
+
+    function updatePhases(currentPhase) {
+        const cp = (currentPhase || '').toLowerCase().replace(/[\s]/g, '_');
+        let foundCurrent = false;
+
+        PHASES.forEach(p => {
+            const el = document.getElementById('phase-' + p.id);
+            if (!el) return;
+            const isMatch = p.keys.some(k => cp.includes(k));
+            if (isMatch && !foundCurrent) {
+                el.className = 'phase-item active';
+                foundCurrent = true;
+            } else if (!foundCurrent) {
+                el.className = 'phase-item done';
+            } else {
+                el.className = 'phase-item';
+            }
+        });
+    }
+
+    async function updateDashboard() {
+        try {
+            const response = await fetch('dashboard_status.json?' + Date.now());
+            const data = await response.json();
+
+            const heartbeat = data.heartbeat ? new Date(data.heartbeat) : null;
+            const isOffline = !heartbeat || (Date.now() - heartbeat.getTime()) > OFFLINE_THRESHOLD_MS;
+            setOffline(isOffline);
+            if (isOffline) return;
+
+            const stats = data.stats;
+            const steps = data.steps;
+
+            // Stats
+            document.getElementById('coverage').textContent = stats.current_coverage.toFixed(2) + '%';
+            document.getElementById('progress').textContent = `${stats.files_completed}/${stats.files_total}`;
+
+            // S2: ETC — se pipeline completo, mostra duração total em vez do contador
+            const etcEl    = document.getElementById('etc');
+            const etcLabel = document.getElementById('etc-label');
+            if (data.is_complete) {
+                if (window.etcInterval) { clearInterval(window.etcInterval); window.etcInterval = null; }
+                if (stats.start_time && stats.last_update) {
+                    const durSec = Math.round((new Date(stats.last_update) - new Date(stats.start_time)) / 1000);
+                    const dh = Math.floor(durSec / 3600);
+                    const dm = Math.floor((durSec % 3600) / 60);
+                    etcEl.textContent = dh > 0 ? `✓ ${dh}h ${dm}m` : `✓ ${dm}m`;
+                } else {
+                    etcEl.textContent = '✓ Finalizado';
+                }
+                etcEl.style.color = 'var(--accent-green)';
+                etcLabel.textContent = 'Duração Total';
+            } else {
                 const remainingFiles = Math.max(0, stats.files_total - stats.files_completed);
                 const avgSec = stats.avg_seconds_per_file || 0;
                 const newEstimate = remainingFiles * avgSec;
-
                 if (avgSec === 0 && remainingFiles > 0) {
-                    document.getElementById('etc').textContent = "Calculando...";
+                    etcEl.textContent = "Calculando...";
                 } else if (remainingFiles === 0 && stats.files_total > 0) {
-                    document.getElementById('etc').textContent = "Concluído!";
+                    etcEl.textContent = "Concluído!";
                     if (window.etcInterval) clearInterval(window.etcInterval);
                 } else {
-                    // Só reinicia o intervalo se não existe, ou se a nova estimativa
-                    // diverge mais de 60s do valor atual em tela (dados reais mudaram)
-                    const etcEl = document.getElementById('etc');
                     const currentDisplay = etcEl.textContent;
-                    const currentSecs = (() => {
-                        const parts = currentDisplay.split(':').map(Number);
-                        if (parts.length !== 3 || isNaN(parts[0])) return -1;
-                        return parts[0]*3600 + parts[1]*60 + parts[2];
-                    })();
+                    const parts = currentDisplay.split(':').map(Number);
+                    const currentSecs = (parts.length === 3 && !isNaN(parts[0]))
+                        ? parts[0]*3600 + parts[1]*60 + parts[2] : -1;
                     const shouldReset = currentSecs < 0 || Math.abs(currentSecs - newEstimate) > 60;
-
                     if (shouldReset) {
                         if (window.etcInterval) clearInterval(window.etcInterval);
-                        let remainingSeconds = newEstimate;
+                        let rem = newEstimate;
                         window.etcInterval = setInterval(() => {
-                            if (remainingSeconds <= 0) {
-                                etcEl.textContent = "Concluindo...";
-                                clearInterval(window.etcInterval);
-                                return;
-                            }
-                            const h = Math.floor(remainingSeconds / 3600).toString().padStart(2, '0');
-                            const m = Math.floor((remainingSeconds % 3600) / 60).toString().padStart(2, '0');
-                            const s = Math.floor(remainingSeconds % 60).toString().padStart(2, '0');
+                            if (rem <= 0) { etcEl.textContent = "Concluindo..."; clearInterval(window.etcInterval); return; }
+                            const h = Math.floor(rem/3600).toString().padStart(2,'0');
+                            const m = Math.floor((rem%3600)/60).toString().padStart(2,'0');
+                            const s = Math.floor(rem%60).toString().padStart(2,'0');
                             etcEl.textContent = `${h}:${m}:${s}`;
-                            remainingSeconds--;
+                            rem--;
                         }, 1000);
                     }
                 }
+            }
 
-                // Update Phases
-                const currentPhase = stats.phase.toLowerCase();
-                const isRefactoring = /\d{2}_.*\.md/.test(currentPhase);
-                let foundCurrent = false;
-                phaseOrder.forEach(p => {
-                    const el = document.getElementById('phase-' + p);
-                    if (!el) return;
-                    const phaseId = p.toLowerCase();
-                    const isMatch = phaseId === '07_solid.md'
-                        ? isRefactoring
-                        : currentPhase.includes(phaseId);
-                    if (isMatch) {
-                        el.className = 'phase-item active';
-                        foundCurrent = true;
-                    } else if (!foundCurrent) {
-                        el.className = 'phase-item done';
-                    } else {
-                        el.className = 'phase-item';
-                    }
-                });
+            // Phases — S4: marca COMMIT_PUSH como done quando pipeline completo
+            updatePhases(stats.phase);
+            if (data.is_complete) {
+                const cpEl = document.getElementById('phase-COMMIT_PUSH');
+                if (cpEl) { cpEl.className = 'phase-item done'; }
+            }
 
-                // Update Honeycomb
-                const honeycomb = document.getElementById('honeycomb');
-                honeycomb.innerHTML = '';
-                steps.forEach(step => {
-                    const li = document.createElement('li');
-                    li.className = `hex ${step.status}`;
-                    li.innerHTML = `<span>${step.name}</span>`;
-                    honeycomb.appendChild(li);
-                });
+            // Honeycomb
+            const honeycomb = document.getElementById('honeycomb');
+            honeycomb.innerHTML = '';
+            const statusLabel = {
+                completed:  'Refatorado ✓',
+                processing: 'Processando...',
+                failed:     'Revertido ✗',
+                skipped:    'Sem ação necessária',
+                pending:    'Aguardando',
+            };
+            steps.forEach(step => {
+                const li = document.createElement('li');
+                li.className = `hex ${step.status}`;
+                const label  = statusLabel[step.status] || step.status;
+                const detail = step.detail && step.detail !== step.name ? step.detail : step.name;
+                li.title = `${detail}\n${label}`;
+                li.innerHTML = `<span>${step.name}</span>`;
+                honeycomb.appendChild(li);
+            });
 
-                // Update Current File from JSON field
+            // S3: arquivo ativo — quando pipeline completo, exibe mensagem de conclusão
+            const currentFileEl = document.getElementById('current-file');
+            if (data.is_complete) {
+                currentFileEl.textContent = '✓ Pipeline concluído';
+                currentFileEl.style.color = 'var(--accent-green)';
+            } else {
                 const activeFile = data.current_file || "Aguardando próxima tarefa...";
-                document.getElementById('current-file').textContent = activeFile;
-                document.getElementById('current-file').style.color =
-                    activeFile.includes(".java") ? "var(--accent-gold)" : "var(--accent-blue)";
+                currentFileEl.textContent = activeFile;
+                currentFileEl.style.color = activeFile.includes('.java') ? 'var(--accent-gold)' : 'var(--accent-blue)';
+            }
 
-                // CPU
-                const cpu = data.cpu_percent ?? -1;
-                const cpuEl  = document.getElementById('cpu-value');
-                const cpuBar = document.getElementById('cpu-bar');
-                const cpuCard = document.getElementById('cpu-card');
-                if (cpu < 0) {
-                    cpuEl.textContent = "N/A";
-                } else {
-                    cpuEl.textContent = cpu.toFixed(1) + '%';
-                    cpuBar.style.width = Math.min(cpu, 100) + '%';
-                    if (cpu >= 90) {
-                        cpuBar.style.background = 'var(--accent-red)';
-                        cpuEl.style.color = 'var(--accent-red)';
-                    } else if (cpu >= 70) {
-                        cpuBar.style.background = 'var(--accent-gold)';
-                        cpuEl.style.color = 'var(--accent-gold)';
-                    } else {
-                        cpuBar.style.background = 'var(--accent-blue)';
-                        cpuEl.style.color = 'var(--accent-blue)';
-                    }
-                }
+            // CPU
+            const cpu = data.cpu_percent ?? -1;
+            const cpuEl  = document.getElementById('cpu-value');
+            const cpuBar = document.getElementById('cpu-bar');
+            if (cpu < 0) {
+                cpuEl.textContent = 'N/A';
+            } else {
+                cpuEl.textContent = cpu.toFixed(1) + '%';
+                cpuBar.style.width = Math.min(cpu, 100) + '%';
+                const cpuColor = cpu >= 90 ? 'var(--accent-red)' : cpu >= 70 ? 'var(--accent-gold)' : 'var(--accent-blue)';
+                cpuBar.style.background = cpuColor;
+                cpuEl.style.color = cpuColor;
+            }
 
-                // Modelo LLM ativo
-                const modelBadge = document.getElementById('current-model-badge');
-                const modelName  = data.current_model || '';
-                modelBadge.textContent = modelName || '--';
-                modelBadge.style.display = modelName ? '' : 'none';
+            // Modelo LLM
+            const modelName = data.current_model || '';
+            const modelBadge = document.getElementById('current-model-badge');
+            modelBadge.textContent = modelName || '--';
+            modelBadge.style.display = modelName ? '' : 'none';
 
-                // Skill ativa
-                const skillLabel = document.getElementById('active-skill-label');
-                const skillName  = data.active_skill || '';
-                skillLabel.textContent = skillName ? '⚡ ' + skillName : '';
+            // Skill ativa
+            const skillName = data.active_skill || '';
+            document.getElementById('active-skill-label').textContent = skillName ? '⚡ ' + skillName : '';
 
-                // Tempo da classe ativa + detecção de lock
+            // Timer da classe ativa — S3: para e limpa quando pipeline completo
+            const lockCard   = document.getElementById('lock-card');
+            const lockStatus = document.getElementById('lock-status');
+            if (window.activeTimerInterval) clearInterval(window.activeTimerInterval);
+
+            if (data.is_complete) {
+                document.getElementById('active-timer').textContent = '--:--';
+                lockCard.classList.remove('lock-warn', 'lock-alert');
+                lockStatus.textContent = 'Tempo da Classe Ativa';
+            } else {
                 const elapsed = data.current_file_elapsed ?? 0;
-                if (window.activeTimerInterval) clearInterval(window.activeTimerInterval);
                 let activeSeconds = elapsed;
-                const lockCard   = document.getElementById('lock-card');
-                const lockStatus = document.getElementById('lock-status');
 
                 const renderTimer = () => {
-                    const m = Math.floor(activeSeconds / 60).toString().padStart(2, '0');
-                    const s = Math.floor(activeSeconds % 60).toString().padStart(2, '0');
+                    const m = Math.floor(activeSeconds/60).toString().padStart(2,'0');
+                    const s = Math.floor(activeSeconds%60).toString().padStart(2,'0');
                     document.getElementById('active-timer').textContent = `${m}:${s}`;
-
-                    lockCard.classList.remove('lock-warn', 'lock-alert');
+                    lockCard.classList.remove('lock-warn','lock-alert');
                     if (activeSeconds >= 600) {
                         lockCard.classList.add('lock-alert');
                         lockStatus.textContent = '⚠ POSSÍVEL LOCK — processo parado há ' + Math.floor(activeSeconds/60) + ' min';
@@ -408,15 +709,15 @@
                     }
                     activeSeconds++;
                 };
-
                 renderTimer();
                 window.activeTimerInterval = setInterval(renderTimer, 1000);
+            }
 
-            } catch (e) { console.error("Sync Error", e); }
-        }
+        } catch (e) { console.error('Sync Error', e); }
+    }
 
-        setInterval(updateDashboard, 5000);
-        updateDashboard();
-    </script>
+    setInterval(updateDashboard, 5000);
+    updateDashboard();
+</script>
 </body>
 </html>

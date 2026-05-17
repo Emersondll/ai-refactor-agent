@@ -114,12 +114,13 @@ class ExecutionLogger:
             message=f"Aceito {change_type}",
         )
 
-    def log_file_reverted(self, phase: str, file: str) -> None:
+    def log_file_reverted(self, phase: str, file: str, error_type: str = "") -> None:
         """Arquivo revertido porque o build quebrou após a mudança."""
+        message = f"Revertido — build quebrou [{error_type}]" if error_type else "Revertido — build quebrou"
         self._write(
             phase=phase, file=file,
             event="FILE_REVERTED", status="REVERT",
-            message="Revertido — build quebrou",
+            message=message,
         )
 
     # ------------------------------------------------------------------
@@ -147,6 +148,14 @@ class ExecutionLogger:
             phase=phase, file=file, agent=agent,
             event="AI_FAILURE", status="ERROR",
             message=f"[{agent}] falha: {reason}",
+        )
+
+    def log_model_used(self, phase: str, file: str,
+                       model: str, result: str = "") -> None:
+        self._write(
+            phase=phase, file=file, model=model,
+            event="MODEL_USED", status="INFO",
+            message=f"[{model}] → {result}",
         )
 
     # ------------------------------------------------------------------

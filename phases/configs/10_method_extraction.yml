@@ -1,0 +1,15 @@
+skill: method-extraction
+description: Extrai métodos com mais de 30 linhas em helpers privados com nomes descritivos
+tool: llm
+method_level: true
+skill_name: java-method-extraction
+skill_section: LLM INSTRUCTIONS
+detect_pattern: long_method
+min_lines: 80
+max_agent: standard
+skip_dep_context: true
+review_criteria: |
+  O diff deve APENAS extrair sub-blocos de métodos longos para métodos privados auxiliares.
+  REJEITE se: lógica alterada, assinaturas públicas ou protegidas modificadas,
+  imports adicionados sem necessidade, comportamento diferente,
+  ou métodos com menos de 5 linhas foram extraídos desnecessariamente.

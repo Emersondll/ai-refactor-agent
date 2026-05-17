@@ -10,13 +10,16 @@ def review_diff(diff: str, criteria: str, model: str) -> Literal["APPROVE", "REJ
     if not diff.strip():
         return "SKIP"
     prompt = _build_prompt(diff, criteria)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(call_model, model, prompt, 0.1)
-        try:
-            response, _ = future.result(timeout=_REVIEWER_TIMEOUT_S)
-        except concurrent.futures.TimeoutError:
-            log("[Reviewer] LLM timeout after 60s — auto-APPROVE", "WARN")
-            return "APPROVE"
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(call_model, model, prompt, 0.1)
+    try:
+        response, _ = future.result(timeout=_REVIEWER_TIMEOUT_S)
+    except concurrent.futures.TimeoutError:
+        log(f"[Reviewer] LLM timeout after {_REVIEWER_TIMEOUT_S}s — auto-APPROVE", "WARN")
+        executor.shutdown(wait=False, cancel_futures=True)
+        return "APPROVE"
+    finally:
+        executor.shutdown(wait=False)
     if not response:
         return "APPROVE"
     first_word = response.strip().split(":")[0].strip().upper()

@@ -1,0 +1,15 @@
+skill: guard-clauses
+description: Aplica Guard Clauses — substitui ifs aninhados (profundidade >= 3) por early return
+tool: llm
+method_level: true
+skill_name: java-guard-clauses
+skill_section: LLM INSTRUCTIONS
+detect_pattern: nested_if
+min_lines: 30
+max_agent: standard
+skip_dep_context: true
+review_criteria: |
+  O diff deve APENAS reestruturar blocos if-else aninhados usando early return (guard clauses).
+  REJEITE se: lógica de negócio alterada, assinaturas de métodos modificadas,
+  imports adicionados ou removidos, comportamento em runtime diferente,
+  ou métodos que já eram planos (profundidade < 3) foram tocados.

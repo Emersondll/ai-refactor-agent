@@ -17,6 +17,21 @@ from java.context import _extract_simplified_header
 _index_cache: dict[str, object] = {}  # repo_path → LlamaIndex VectorStoreIndex
 
 
+def _resolve_explicit_imports(full_imports: list[str], repo_path: str) -> list[str]:
+    """Resolve com.* imports directly from filesystem — guarantees enums are included."""
+    parts_list = []
+    for full_imp in full_imports:
+        imp_parts = full_imp.split(".")
+        potential_path = Path(repo_path, "src", "main", "java",
+                              *imp_parts[:-1], imp_parts[-1] + ".java")
+        if potential_path.exists():
+            code = potential_path.read_text(encoding="utf-8", errors="ignore")
+            header = _extract_simplified_header(code, full_imp)
+            parts_list.append(f"// SUGGESTED IMPORT: import {full_imp};")
+            parts_list.append(header)
+    return parts_list
+
+
 def _build_java_index(repo_path: str):
     """Build (or load from disk) a LlamaIndex over all .java files in repo."""
     main_java = Path(repo_path) / "src" / "main" / "java"
@@ -69,11 +84,19 @@ def get_rag_context(file_code: str, repo_path: str) -> str:
     if not imports:
         return ""
 
+    # Always resolve explicitly-imported com.* classes from filesystem.
+    # Semantic search alone may miss enum files — this guarantees they are included.
+    full_com_imports = re.findall(r'^import\s+(com\.[\w.]+);', file_code, re.MULTILINE)
+    explicit_parts = _resolve_explicit_imports(full_com_imports, repo_path)
+    explicitly_resolved = {imp.split(".")[-1] for imp in full_com_imports}
+
     if repo_path not in _index_cache:
         _index_cache[repo_path] = _build_java_index(repo_path)
 
     index = _index_cache.get(repo_path)
     if index is None:
+        if explicit_parts:
+            return "\n--- DEPENDENCY CONTEXT (SIGNATURES) ---\n" + "\n".join(explicit_parts)
         return ""
 
     try:
@@ -86,15 +109,18 @@ def get_rag_context(file_code: str, repo_path: str) -> str:
         retriever = index.as_retriever(similarity_top_k=4, embed_model=embed_model)
         nodes = retriever.retrieve(query)
 
-        if not nodes:
-            return ""
-
         parts = ["\n--- RAG DEPENDENCY CONTEXT ---"]
+        parts.extend(explicit_parts)
+
+        # Add RAG results only for classes not already resolved explicitly
         for node in nodes:
             name = node.metadata.get("name", "Unknown")
-            header = _extract_simplified_header(node.text, name)
-            parts.append(header)
+            if name not in explicitly_resolved:
+                header = _extract_simplified_header(node.text, name)
+                parts.append(header)
 
         return "\n".join(parts)
     except Exception:
+        if explicit_parts:
+            return "\n--- DEPENDENCY CONTEXT (SIGNATURES) ---\n" + "\n".join(explicit_parts)
         return ""

@@ -76,7 +76,12 @@ def select_agent_priority(file_type: FileType, complexity: FileComplexity,
         return ["ultimate", "advanced", "standard", "claude"]
 
     if mode == "test" or "test" in phase_lower:
-        return ["ultimate", "advanced", "standard", "claude"]
+        # gemma4(advanced) primário — 14b(ultimate) fallback — 7b(standard) último recurso
+        # 14b reintroduzido: gera código de qualidade superior ao 7b; OOM era em modo refatoração,
+        # não em modo teste onde os arquivos são menores e o contexto é mais limitado
+        if complexity == FileComplexity.SIMPLE:
+            return ["advanced", "standard", "claude"]
+        return ["advanced", "ultimate", "standard", "claude"]
 
     # 2. Casos críticos por tamanho
     if complexity == FileComplexity.LARGE:
@@ -96,8 +101,8 @@ def select_agent_priority(file_type: FileType, complexity: FileComplexity,
 
 def should_use_claude(file_type: FileType, complexity: FileComplexity,
                       mode: str, attempts_failed: int) -> bool:
-    if mode == "test":
-        return True
+    # Nota: USE_CLAUDE_FALLBACK=false é hard block em _run_pipeline — esta função
+    # só é consultada quando a flag está true ou todos os locais falharam
     if complexity == FileComplexity.LARGE:
         return True
     if file_type == FileType.SERVICE and complexity in (FileComplexity.MEDIUM, FileComplexity.LARGE):

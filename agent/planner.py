@@ -4,7 +4,7 @@ import re
 import anthropic
 import requests
 
-from config import CLAUDE_API_KEY, CLAUDE_MODEL, USE_LOCAL_PLANNER, OLLAMA_BASE_URL, MODEL_SOLID
+from config import CLAUDE_API_KEY, CLAUDE_MODEL, USE_LOCAL_PLANNER, OLLAMA_BASE_URL, MODEL_SOLID, MODEL_PLANNER
 from agent.skill_catalog import catalog_for_prompt
 from core.utils import read_file
 from core.logger import log
@@ -91,16 +91,44 @@ def _call_claude_planner(observation: dict) -> list[dict]:
         return _call_local_planner(observation)
 
 
+def _compact_observation(observation: dict) -> dict:
+    """Reduz o tamanho da observação para caber no contexto do modelo local."""
+    files = observation.get("files", [])
+    # Ordena: pendentes primeiro, depois por nome; limita a 8 arquivos por ciclo
+    pending = [f for f in files if f.get("phases_pending")]
+    pending.sort(key=lambda f: (f.get("build_failures", 0), f["name"]))
+    top_files = pending[:8]
+    compact_files = [
+        {
+            "name": f["name"],
+            "lines": f["lines"],
+            "pending": len(f.get("phases_pending", [])),
+            "pending_skills": f.get("phases_pending", [])[:6],
+            "build_failures": f.get("build_failures", 0),
+        }
+        for f in top_files
+    ]
+    return {
+        "project":          observation.get("project", ""),
+        "build":            observation.get("build", "green"),
+        "cycle":            observation.get("cycle", 1),
+        "max_cycles":       observation.get("max_cycles", 20),
+        "files":            compact_files,
+        "failed_files":     observation.get("failed_files", []),
+        "last_build_error": observation.get("last_build_error"),
+    }
+
+
 def _call_local_planner(observation: dict) -> list[dict]:
     catalog = catalog_for_prompt()
-    obs_json = json.dumps(observation, indent=2, ensure_ascii=False)
+    obs_json = json.dumps(_compact_observation(observation), indent=2, ensure_ascii=False)
     prompt = _LOCAL_PLANNER_PROMPT_TEMPLATE.format(obs_json=obs_json, catalog=catalog)
 
-    log(f"[Planner/Local] Chamando {MODEL_SOLID}...", "INFO")
+    log(f"[Planner/Local] Chamando {MODEL_PLANNER}...", "INFO")
     try:
         response = requests.post(
             f"{OLLAMA_BASE_URL}/api/generate",
-            json={"model": MODEL_SOLID, "prompt": prompt, "stream": False,
+            json={"model": MODEL_PLANNER, "prompt": prompt, "stream": False,
                   "options": {"temperature": 0.2, "num_predict": 1024}},
             timeout=120,
         )

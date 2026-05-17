@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Relatório de Refatoração — AI Refactor Agent</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+        background: #0a0e1a;
+        color: #c9d1d9;
+        font-family: 'Segoe UI', system-ui, sans-serif;
+        min-height: 100vh;
+        padding: 2rem;
+    }
+
+    header {
+        text-align: center;
+        padding: 2rem 0 1.5rem;
+        background: radial-gradient(circle at center, rgba(0,212,255,0.12) 0%, transparent 70%);
+        margin-bottom: 2rem;
+    }
+
+    header h1 {
+        font-size: 2rem;
+        font-weight: 700;
+        letter-spacing: 2px;
+        background: linear-gradient(90deg, #00d4ff, #00ff88);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+
+    .nav {
+        text-align: center;
+        margin-bottom: 1.5rem;
+    }
+
+    .nav a {
+        color: #00d4ff;
+        text-decoration: none;
+        font-size: 0.9rem;
+        padding: 0.4rem 1rem;
+        border: 1px solid rgba(0,212,255,0.3);
+        border-radius: 20px;
+        background: rgba(0,212,255,0.07);
+        transition: background 0.2s;
+    }
+
+    .nav a:hover { background: rgba(0,212,255,0.15); }
+
+    #meta {
+        text-align: center;
+        font-size: 0.8rem;
+        color: #8b949e;
+        margin-bottom: 2rem;
+    }
+
+    #report-container {
+        max-width: 900px;
+        margin: 0 auto;
+        background: rgba(255,255,255,0.03);
+        border: 1px solid rgba(255,255,255,0.07);
+        border-radius: 12px;
+        padding: 2.5rem;
+        line-height: 1.7;
+    }
+
+    #report-container h1 {
+        font-size: 1.8rem;
+        color: #00d4ff;
+        border-bottom: 1px solid rgba(0,212,255,0.3);
+        padding-bottom: 0.8rem;
+        margin-bottom: 1.5rem;
+        -webkit-text-fill-color: #00d4ff;
+        background: none;
+    }
+
+    #report-container h2 {
+        font-size: 1.25rem;
+        color: #00ff88;
+        margin: 2rem 0 0.8rem;
+        padding-left: 0.5rem;
+        border-left: 3px solid #00ff88;
+    }
+
+    #report-container h3 {
+        font-size: 1.05rem;
+        color: #ffcc33;
+        margin: 1.2rem 0 0.4rem;
+    }
+
+    #report-container p {
+        margin-bottom: 0.8rem;
+        color: #c9d1d9;
+    }
+
+    #report-container ul, #report-container ol {
+        padding-left: 1.5rem;
+        margin-bottom: 0.8rem;
+    }
+
+    #report-container li {
+        margin-bottom: 0.3rem;
+        color: #c9d1d9;
+    }
+
+    #report-container strong {
+        color: #e6edf3;
+    }
+
+    #report-container table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 1rem;
+        font-size: 0.9rem;
+    }
+
+    #report-container th {
+        background: rgba(0,212,255,0.1);
+        color: #00d4ff;
+        padding: 0.5rem 0.8rem;
+        text-align: left;
+        border: 1px solid rgba(255,255,255,0.08);
+    }
+
+    #report-container td {
+        padding: 0.5rem 0.8rem;
+        border: 1px solid rgba(255,255,255,0.06);
+        color: #c9d1d9;
+    }
+
+    #report-container tr:nth-child(even) td {
+        background: rgba(255,255,255,0.02);
+    }
+
+    #report-container code {
+        background: rgba(0,212,255,0.08);
+        border: 1px solid rgba(0,212,255,0.2);
+        border-radius: 4px;
+        padding: 0.1rem 0.4rem;
+        font-family: 'Cascadia Code', 'Fira Code', monospace;
+        font-size: 0.88em;
+        color: #79c0ff;
+    }
+
+    #report-container pre {
+        background: rgba(0,0,0,0.4);
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 8px;
+        padding: 1rem;
+        overflow-x: auto;
+        margin-bottom: 1rem;
+    }
+
+    #report-container pre code {
+        background: none;
+        border: none;
+        padding: 0;
+        color: #e6edf3;
+    }
+
+    #report-container blockquote {
+        border-left: 3px solid #ff8c42;
+        padding-left: 1rem;
+        color: #8b949e;
+        margin-bottom: 0.8rem;
+    }
+
+    #report-container hr {
+        border: none;
+        border-top: 1px solid rgba(255,255,255,0.08);
+        margin: 2rem 0;
+    }
+
+    .empty-state {
+        text-align: center;
+        padding: 4rem 2rem;
+        color: #8b949e;
+    }
+
+    .empty-state .icon { font-size: 3rem; margin-bottom: 1rem; }
+
+    .refresh-btn {
+        display: inline-block;
+        margin-top: 1rem;
+        padding: 0.5rem 1.5rem;
+        background: rgba(0,212,255,0.1);
+        border: 1px solid rgba(0,212,255,0.3);
+        border-radius: 20px;
+        color: #00d4ff;
+        cursor: pointer;
+        font-size: 0.85rem;
+        transition: background 0.2s;
+    }
+
+    .refresh-btn:hover { background: rgba(0,212,255,0.2); }
+</style>
+</head>
+<body>
+
+<header>
+    <h1>Relatório de Refatoração</h1>
+</header>
+
+<div class="nav">
+    <a href="dashboard.html">← Voltar ao Dashboard</a>
+</div>
+
+<div id="meta">Carregando...</div>
+
+<div id="report-container">
+    <div class="empty-state">
+        <div class="icon">📄</div>
+        <p>Aguardando geração do relatório...</p>
+        <p style="font-size:0.8rem; margin-top:0.5rem;">O relatório é gerado automaticamente ao final de cada ciclo de refatoração.</p>
+    </div>
+</div>
+
+<script>
+    const REPORT_PATH = 'logs/refactoring_report.md';
+
+    async function loadReport() {
+        try {
+            const res = await fetch(REPORT_PATH + '?' + Date.now());
+            if (!res.ok) throw new Error('not found');
+            const md = await res.text();
+
+            const container = document.getElementById('report-container');
+            container.innerHTML = marked.parse(md);
+
+            // Extrai data do primeiro H1 para exibir no meta
+            const h1 = container.querySelector('h1');
+            const metaEl = document.getElementById('meta');
+            if (h1) {
+                metaEl.textContent = h1.textContent + ' · Atualizado: ' + new Date().toLocaleTimeString('pt-BR');
+            } else {
+                metaEl.textContent = 'Atualizado: ' + new Date().toLocaleTimeString('pt-BR');
+            }
+
+        } catch (e) {
+            document.getElementById('report-container').innerHTML = `
+                <div class="empty-state">
+                    <div class="icon">📄</div>
+                    <p>Relatório ainda não disponível.</p>
+                    <p style="font-size:0.8rem; margin-top:0.5rem;">
+                        O relatório é gerado ao final de cada ciclo.<br>
+                        Caminho esperado: <code>${REPORT_PATH}</code>
+                    </p>
+                    <div class="refresh-btn" onclick="loadReport()">Tentar novamente</div>
+                </div>`;
+            document.getElementById('meta').textContent = '';
+        }
+    }
+
+    loadReport();
+    // Verifica a cada 30s se o relatório apareceu
+    setInterval(loadReport, 30000);
+</script>
+</body>
+</html>
