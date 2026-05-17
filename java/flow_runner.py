@@ -114,6 +114,7 @@ def dry_check(skill_config: dict, repo_path: str, exec_logger=None) -> tuple[boo
     tool: flow-dry → chamado por main.py.
     """
     from java.refactor import get_java_files
+    from java.llm_runner import _is_structural_type
 
     skill_id = skill_config.get("skill", "dry-check")
     rules    = _load_rules(skill_config)
@@ -123,7 +124,20 @@ def dry_check(skill_config: dict, repo_path: str, exec_logger=None) -> tuple[boo
         return False, ""
 
     java_files = get_java_files(repo_path, tests=False)
-    candidates = _find_dry_candidates(java_files)
+
+    # C2: filtra tipos estruturais antes de detectar candidatos DRY
+    filtered: list[str] = []
+    for f in java_files:
+        code = read_file(f) or ""
+        if _is_structural_type(code, f):
+            log(f"  [DryCheck] {os.path.basename(f)} — tipo estrutural, ignorando")
+        else:
+            filtered.append(f)
+    skipped_structural = len(java_files) - len(filtered)
+    if skipped_structural:
+        log(f"[DryCheck] {skipped_structural} arquivos estruturais filtrados antes da detecção")
+
+    candidates = _find_dry_candidates(filtered)
 
     if not candidates:
         log("[DryCheck] Nenhum padrão DRY detectado", "OK")
@@ -131,20 +145,27 @@ def dry_check(skill_config: dict, repo_path: str, exec_logger=None) -> tuple[boo
 
     log(f"[DryCheck] {len(candidates)} grupos candidatos")
     any_changed = False
+    seen_files: set[str] = set()  # C3: deduplicação entre grupos
 
     for group in candidates:
-        names = [os.path.basename(f) for f in group["files"]]
+        # C3: remove arquivos já incluídos em grupos processados anteriormente
+        group_files = [f for f in group["files"] if f not in seen_files]
+        if len(group_files) < 2:
+            log(f"  [DryCheck] grupo '{group['method']}' — < 2 arquivos após deduplicação, pulando")
+            continue
+        seen_files |= set(group_files)
+
+        names = [os.path.basename(f) for f in group_files]
         log(f"  [DryCheck] analisando: {names} (método: {group['method']})")
         _live(active_skill=skill_id, current_model="")
         group_label = f"DRYGroup({','.join(names)})"
-        # M3: sinaliza processamento do grupo no dashboard
         if exec_logger:
             for n in names:
                 exec_logger.log_file_processing(skill_id, n, "java", "dry")
 
         group_code = "\n\n".join(
             f"// FILE: {os.path.basename(f)}\n{read_file(f)}"
-            for f in group["files"]
+            for f in group_files
             if read_file(f)
         )
 
@@ -161,7 +182,7 @@ def dry_check(skill_config: dict, repo_path: str, exec_logger=None) -> tuple[boo
                     exec_logger.log_file_skipped(skill_id, n, "no_change")
             continue
 
-        changed = _apply_dry_result(result, group["files"], repo_path)
+        changed = _apply_dry_result(result, group_files, repo_path)
         if not changed:
             if exec_logger:
                 for n in names:

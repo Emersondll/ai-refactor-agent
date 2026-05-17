@@ -224,6 +224,28 @@ def _run_class_level(file_path: str, file_name: str, code: str,
     skip_compression=True: envia o código original completo, sem compressão de métodos.
     skip_compression=False: comprime métodos já processados para reduzir tokens.
     """
+    # C4: pré-filtro — sem instanciações concretas (new ConcreteClass()) = DIP não aplicável
+    # Também pula classes de bootstrap que raramente são candidatas à injeção
+    _NO_NEW = not re.search(r'\bnew\s+[A-Z]\w+\s*\(', code)
+    _BOOTSTRAP = bool(re.search(r'@(SpringBootApplication|SpringBootTest|Configuration)\b', code))
+    if _NO_NEW or _BOOTSTRAP:
+        reason = "no_new_instantiation" if _NO_NEW else "bootstrap_class"
+        log(f"  [{skill_id}] {file_name} — pré-filtro ({reason}), pulando")
+        if cache:
+            cache.mark_phase_done(file_path, skill_id)
+        if exec_logger:
+            exec_logger.log_file_skipped(skill_id, file_name, reason)
+        return False
+
+    # M4: evita conflito estrutural — pula se flow-refactor já processou este arquivo
+    if cache and cache.is_phase_done(file_path, "flow-refactor"):
+        log(f"  [{skill_id}] {file_name} — flow-refactor aplicado, deferindo solid-dip")
+        if cache:
+            cache.mark_phase_done(file_path, skill_id)
+        if exec_logger:
+            exec_logger.log_file_skipped(skill_id, file_name, "deferred_flow_refactor")
+        return False
+
     if skip_compression:
         payload = code
         log(f"  [{skill_id}] {file_name} — classe completa ({len(code.splitlines())} linhas, sem compressão)")

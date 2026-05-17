@@ -216,8 +216,11 @@ def main():
     # --- Javadoc ---
     log("Inserindo Javadoc nos métodos públicos...", "PHASE")
     exec_logger.log_phase_start("JAVADOC", "Inserção de Javadoc em métodos públicos")
-    from java.javadoc_runner import run_javadoc
-    run_javadoc(repo_path, exec_logger=exec_logger)
+    try:
+        from java.javadoc_runner import run_javadoc
+        run_javadoc(repo_path, exec_logger=exec_logger)
+    except Exception as _javadoc_err:
+        log(f"[Javadoc] Erro na fase: {_javadoc_err} — continuando pipeline", "WARN")
 
     # --- Validação Final ---
     log("Iniciando Validação Final...", "PHASE")
