@@ -108,23 +108,38 @@ def _process_one_file(file_path: str, rules: str, repo_path: str, exec_logger) -
 # Heurística: verifica se todos os métodos públicos visíveis já têm Javadoc
 # ---------------------------------------------------------------------------
 
-_RE_PUBLIC_METHOD = re.compile(
-    r'(?<!\*/\s{0,80})'          # não precedido de fim de javadoc
-    r'public\s+(?!class|interface|enum|@interface)'
-    r'(?:(?:static|final|synchronized|abstract)\s+)*'
-    r'[\w<>\[\]]+\s+\w+\s*\(',
-    re.MULTILINE,
+_RE_METHOD_LINE = re.compile(
+    r'public\s+(?!class\b|interface\b|enum\b|@interface\b)'
+    r'(?:(?:static|final|synchronized|abstract|default)\s+)*'
+    r'[\w<>\[\],\s]+\s+\w+\s*\(',
 )
-
-_RE_JAVADOC_BEFORE = re.compile(r'/\*\*[\s\S]*?\*/\s*\n\s*public\s', re.MULTILINE)
 
 
 def _all_public_methods_documented(code: str) -> bool:
-    """Retorna True se o número de métodos públicos documentados iguala o total."""
-    total = len(_RE_PUBLIC_METHOD.findall(code))
+    """
+    Retorna True se todos os métodos públicos visíveis já têm Javadoc.
+    Usa scan linha a linha para evitar lookbehind de comprimento variável.
+    """
+    lines = code.splitlines()
+    total = 0
+    documented = 0
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not _RE_METHOD_LINE.match(stripped):
+            continue
+        total += 1
+        # Verifica até 6 linhas anteriores em busca de fim de javadoc
+        for j in range(i - 1, max(-1, i - 7), -1):
+            prev = lines[j].strip()
+            # Fim de javadoc multi-linha ('*/') ou javadoc de linha única ('/** ... */')
+            if prev.endswith('*/') and (prev == '*/' or prev.startswith('/*')):
+                documented += 1
+                break
+            # Para de procurar se encontrar código não-Javadoc (não é anotação nem comentário)
+            if prev and not prev.startswith('*') and not prev.startswith('/*') and not prev.startswith('@'):
+                break
     if total == 0:
         return True
-    documented = len(_RE_JAVADOC_BEFORE.findall(code))
     return documented >= total
 
 

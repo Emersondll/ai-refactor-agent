@@ -44,10 +44,17 @@ _SKIP_LABELS = {
     "no_business_logic":        "Tipo estrutural sem lógica de negócio (interface, @Document, @Entity, repository, DTO) — fase não aplicável",
     "not_a_controller":         "Não é um @RestController — fase controller-lean não se aplica",
     "no_change":                "Código já em conformidade com os critérios da fase — nenhuma alteração necessária",
+    "no_pattern_match":         "Nenhum método da classe apresentou o padrão alvo da fase — fase não aplicável",
     "compile_failed":           "Geração falhou após múltiplas tentativas de reparo — alteração revertida para preservar build estável",
     "already_documented":       "Todos os métodos públicos já possuem Javadoc",
     "deferred_field_injection": "Classe usa @Autowired em campo sem construtor explícito — aguarda conversão para constructor injection (solid-dip)",
     "repair_no_change":         "Reparo automático não produziu alteração válida — operação cancelada",
+    "no_new_instantiation":     "Classe não contém instanciações concretas (new ConcreteClass()) — injeção de dependência não aplicável",
+    "bootstrap_class":          "Classe de configuração/bootstrap (@SpringBootApplication, @Configuration) — DIP não aplicável",
+    "deferred_flow_refactor":   "Classe já foi processada por flow-refactor — solid-dip deferido para evitar conflito estrutural",
+    "deferred_repeat_failure":  "Classe falhou nesta fase em ciclo anterior — deferida para revisão manual",
+    "timeout":                  "Processamento excedeu o tempo limite por arquivo — operação cancelada para não bloquear o pipeline",
+    "permanent_skip":           "Classe atingiu o limite de falhas consecutivas nesta fase — marcada para revisão manual",
 }
 
 
@@ -202,13 +209,14 @@ def _call_llm_for_report(summary_text: str, date: str) -> str | None:
     except Exception:
         pass
 
-    # Fallback: modelo local
+    # Fallback: modelo local — chama call_model diretamente (output é Markdown, não Java)
     try:
-        result = _try_local_agent("report", MODEL_REVIEWER, prompt,
-                                  temperature=0.3, num_predict=4096)
-        if result and len(result) > 200:
+        from ai.model import call_model
+        raw, is_oom = call_model(MODEL_REVIEWER, prompt, temperature=0.3,
+                                 num_predict=4096, timeout=600)
+        if raw and not is_oom and len(raw.strip()) > 200:
             log("[Report] Relatório gerado via modelo local ✓", "OK")
-            return result
+            return raw.strip()
     except Exception:
         pass
 

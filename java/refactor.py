@@ -1140,6 +1140,15 @@ def generate_tests(repo_path: str, phase: str, rules: str,
                 "Do NOT omit it — the class will not compile without it.\n"
             )
 
+        # Proibição incondicional de packages fictícios — aplicada em todas as gerações e reparos
+        active_rules += (
+            "\n\n### PACKAGE PROHIBITION (CRITICAL — ANY VIOLATION CAUSES COMPILE FAILURE)\n"
+            "NEVER use com.example.*, com.test.*, com.demo.*, or ANY package not present "
+            "in the ### IMPORTS PRESENT IN PRODUCTION CLASS section above.\n"
+            "All imports MUST come verbatim from the production source file listed above.\n"
+            "If a type's package is unknown to you, derive it from the production imports — do NOT invent one.\n"
+        )
+
         file_start_time = time.time()
 
         test_code, reason = _generate_and_validate(
