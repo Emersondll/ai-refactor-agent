@@ -1,6 +1,25 @@
 # AI Refactor Agent
 
-Agente autônomo de refatoração Java que roda **100% localmente** via Ollama. Aplica 16 fases de qualidade — ferramentas determinísticas + LLM método a método — mantendo o build Maven sempre verde e gerando um relatório narrativo ao final de cada ciclo.
+Agente autônomo de refatoração Java que roda **100% localmente** via Ollama.
+
+---
+
+## Screenshots
+
+### Dashboard em Tempo Real
+![Dashboard — Pipeline e métricas](docs/images/dashboard_overview.png)
+
+> Pipeline de 16 fases com status ao vivo, cobertura de testes, ETC e modelo LLM ativo.
+
+### Colmeia de Classes (Honeycomb)
+![Dashboard — Colmeia de arquivos](docs/images/dashboard_full.png)
+
+> Cada hexágono representa uma classe Java. Cores: verde = refatorado, laranja = pulado (estrutural/conforme), vermelho = revertido, dourado = em processamento.
+
+### Visualizador de Relatório
+![Relatório de Refatoração](docs/images/report_viewer.png)
+
+> Relatório narrativo gerado por LLM ao final de cada ciclo — acessível em `http://localhost:8000/report.html`. Aplica 16 fases de qualidade — ferramentas determinísticas + LLM método a método — mantendo o build Maven sempre verde e gerando um relatório narrativo ao final de cada ciclo.
 
 ---
 
