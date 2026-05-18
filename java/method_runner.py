@@ -306,9 +306,10 @@ def _run_class_level(file_path: str, file_name: str, code: str,
                 cache.mark_phase_done(file_path, skill_id)
             if exec_logger:
                 exec_logger.log_file_reverted(skill_id, file_name, "compile_failed")
-            # Registra falha para evitar retry em ciclos futuros (permanent_skip após threshold)
+            # S4: registra com stack trace para diagnóstico futuro
             from java.refactor import get_failed_tracker as _get_ft
-            _get_ft().record(file_path, skill_id, "compile_failed")
+            _get_ft().record(file_path, skill_id, "compile_failed",
+                             stack_trace=err_output[-800:])
             return False
 
         log(f"  [{skill_id}] {file_name} — compile falhou (tentativa {attempt}/{_MAX_RETRIES}), reparando...", "WARN")
@@ -327,8 +328,10 @@ def _run_class_level(file_path: str, file_name: str, code: str,
                 cache.mark_phase_done(file_path, skill_id)
             if exec_logger:
                 exec_logger.log_file_reverted(skill_id, file_name, "repair_no_change")
+            # S4: registra com stack trace para diagnóstico futuro
             from java.refactor import get_failed_tracker as _get_ft
-            _get_ft().record(file_path, skill_id, "repair_no_change")
+            _get_ft().record(file_path, skill_id, "repair_no_change",
+                             stack_trace=err_output[-800:])
             return False
         new_code = repaired
         write_file(file_path, new_code)

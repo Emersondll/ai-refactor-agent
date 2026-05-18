@@ -117,6 +117,9 @@ def _process_one_file(file_path: str, rules: str, repo_path: str, exec_logger) -
         log(f"  [javadoc] {file_name} — LLM modificou código além dos comentários, rejeitando", "WARN")
         if exec_logger:
             exec_logger.log_file_skipped(SKILL_ID, file_name, "code_structure_changed")
+        # S3: acumula no FailedFilesTracker → permanent_skip após 3 ciclos consecutivos
+        from java.refactor import get_failed_tracker as _get_ft
+        _get_ft().record(file_path, SKILL_ID, "code_structure_changed")
         return
 
     write_file(file_path, new_code)

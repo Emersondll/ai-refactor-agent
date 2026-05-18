@@ -22,9 +22,12 @@ class Cache:
         repo_key = hashlib.sha256(repo_abs.encode()).hexdigest()[:8]
         self._base = os.path.join(repo_abs, ".refactor_cache", repo_key)
         self._dep_dir = os.path.join(self._base, "dep_ctx")
+        # S1: diretório de fases persistentes — chaveado por (file_hash, phase, content_hash)
+        self._phase_dir = os.path.join(self._base, "phases")
         os.makedirs(self._dep_dir, exist_ok=True)
+        os.makedirs(self._phase_dir, exist_ok=True)
 
-        # In-memory: zerado a cada run (nova instância)
+        # In-memory: aceleração para o run atual
         self._phase_done: dict[str, set[str]] = {}
         self._project_dict: Optional[str] = None
 
@@ -45,13 +48,44 @@ class Cache:
         with open(path, "w", encoding="utf-8") as f:
             f.write(context)
 
-    # --- Phase tracking (in-memory por run) ---
+    # --- Phase tracking (in-memory + disco persistente entre runs) ---
 
     def is_phase_done(self, file_path: str, phase_name: str) -> bool:
-        return phase_name in self._phase_done.get(file_path, set())
+        if phase_name in self._phase_done.get(file_path, set()):
+            return True
+        # S1: verifica disco — True se o hash do arquivo coincide com o do último sucesso
+        return self._disk_phase_matches(file_path, phase_name)
 
     def mark_phase_done(self, file_path: str, phase_name: str) -> None:
         self._phase_done.setdefault(file_path, set()).add(phase_name)
+        # S1: persiste no disco com hash do conteúdo atual do arquivo
+        self._persist_phase(file_path, phase_name)
+
+    def _phase_key(self, file_path: str, phase_name: str) -> str:
+        return f"{sha12(os.path.abspath(file_path))}_{phase_name}"
+
+    def _persist_phase(self, file_path: str, phase_name: str) -> None:
+        try:
+            with open(file_path, encoding="utf-8") as f:
+                content_hash = sha12(f.read())
+            path = os.path.join(self._phase_dir, f"{self._phase_key(file_path, phase_name)}.hash")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(content_hash)
+        except OSError:
+            pass
+
+    def _disk_phase_matches(self, file_path: str, phase_name: str) -> bool:
+        try:
+            path = os.path.join(self._phase_dir, f"{self._phase_key(file_path, phase_name)}.hash")
+            if not os.path.exists(path):
+                return False
+            with open(file_path, encoding="utf-8") as f:
+                current_hash = sha12(f.read())
+            with open(path, encoding="utf-8") as f:
+                saved_hash = f.read().strip()
+            return current_hash == saved_hash
+        except OSError:
+            return False
 
     # --- Method-level tracking (chave: file_path#method_cache_key) ---
 

@@ -999,6 +999,12 @@ def generate_tests(repo_path: str, phase: str, rules: str,
         if skip:
             continue
 
+        # S2: pula tipos estruturais (records, interfaces, @Document/@Entity, DTOs)
+        # que as fases LLM já ignoram — evita gerar testes que falham por ausência de lógica
+        from java.llm_runner import _is_structural_type
+        if _is_structural_type(original, main_file):
+            continue
+
         test_path = _test_path_for(main_file, repo_path)
         if not test_path:
             continue
@@ -1012,16 +1018,25 @@ def generate_tests(repo_path: str, phase: str, rules: str,
                 exec_logger.log_file_skipped(phase, test_name, "permanent_skip")
             continue
 
-        # M7: deferred skip — controller com field injection (@Autowired sem construtor)
+        # M7: deferred skip — class de produção com field injection (@Autowired sem construtor)
         if _has_field_injection_without_constructor(original):
-            log(
-                f"  {test_name}: DEFERRED — field injection detectada "
-                f"(testar após fase 11 SOLID DIP)", "WARN"
-            )
-            if exec_logger:
-                exec_logger.log_file_skipped(phase, test_name, "deferred_field_injection")
-            reporter.record_skipped(phase, test_name, "deferred: field injection sem construtor")
-            continue
+            # S5: se solid-dip já atingiu permanent_skip, não há mais chance de conversão
+            # para constructor injection — gera o teste diretamente com @InjectMocks
+            if get_failed_tracker().is_permanent_skip(main_file, "solid-dip"):
+                log(
+                    f"  {test_name}: solid-dip permanent_skip — gerando teste com field injection",
+                    "WARN"
+                )
+                # Não dá continue — segue para geração normal com @InjectMocks
+            else:
+                log(
+                    f"  {test_name}: DEFERRED — field injection detectada "
+                    f"(testar após fase 11 SOLID DIP)", "WARN"
+                )
+                if exec_logger:
+                    exec_logger.log_file_skipped(phase, test_name, "deferred_field_injection")
+                reporter.record_skipped(phase, test_name, "deferred: field injection sem construtor")
+                continue
 
         # M8: complementação de testes existentes com cobertura parcial
         complement_mode   = False
