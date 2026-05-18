@@ -1123,6 +1123,32 @@ def generate_tests(repo_path: str, phase: str, rules: str,
                 f"- Import: `import {_pkg}.{_cls};`\n"
                 f"Do NOT use com.example.*, com.test.*, or any invented package for {_cls}.\n"
             )
+            # C2: nome exato da classe de teste e package derivado do test_path
+            _test_cls_name = test_name.replace(".java", "")
+            _test_pkg = ""
+            try:
+                _norm_tp = test_path.replace("\\", "/")
+                _java_idx = _norm_tp.find("/test/java/")
+                if _java_idx >= 0:
+                    _pkg_path = _norm_tp[_java_idx + len("/test/java/"):]
+                    _pkg_path = "/".join(_pkg_path.split("/")[:-1])
+                    _test_pkg = _pkg_path.replace("/", ".")
+            except Exception:
+                pass
+            active_rules += (
+                f"\n\n### TEST CLASS — MANDATORY NAME AND PACKAGE (CRITICAL)\n"
+                f"- The test class declaration MUST be EXACTLY: `public class {_test_cls_name} {{`\n"
+                f"- NEVER rename, shorten, or alter this class name in any way.\n"
+                f"- Forbidden variants (examples of WRONG names): "
+                f"`{_cls}Tests`, `{_test_cls_name.replace('Model', '')}`, "
+                f"`{_test_cls_name.replace('Test', 'Spec')}` or any other variant.\n"
+            )
+            if _test_pkg:
+                active_rules += (
+                    f"- The package declaration MUST be EXACTLY: `package {_test_pkg};`\n"
+                    f"- NEVER abbreviate `{_test_pkg}` — copy the FULL package path verbatim.\n"
+                    f"  (Common mistake: writing `{'.'.join(_test_pkg.split('.')[:3])}.*` instead of the full path)\n"
+                )
         _prod_imports = re.findall(r'^import\s+[\w.]+;', original, re.MULTILINE)
         if _prod_imports:
             active_rules += (

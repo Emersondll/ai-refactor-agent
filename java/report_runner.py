@@ -55,6 +55,7 @@ _SKIP_LABELS = {
     "deferred_repeat_failure":  "Classe falhou nesta fase em ciclo anterior — deferida para revisão manual",
     "timeout":                  "Processamento excedeu o tempo limite por arquivo — operação cancelada para não bloquear o pipeline",
     "permanent_skip":           "Classe atingiu o limite de falhas consecutivas nesta fase — marcada para revisão manual",
+    "code_structure_changed":   "LLM alterou estrutura do código além dos comentários Javadoc — alteração rejeitada para preservar integridade",
 }
 
 

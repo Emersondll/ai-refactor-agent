@@ -27,6 +27,9 @@ from java.compiler import ENV_WRAPPER
 SKILL_ID = "javadoc"
 FILE_TIMEOUT_SECS = 300  # 5 minutos por arquivo
 
+# C4: classes de bootstrap/configuração Spring não devem receber Javadoc (mesma regra do method_runner)
+_BOOTSTRAP_RE = re.compile(r'@(SpringBootApplication|Configuration|SpringBootTest)\b')
+
 
 def run_javadoc(repo_path: str, exec_logger=None) -> None:
     """Percorre todos os arquivos Java de produção e insere Javadoc nos métodos públicos."""
@@ -39,9 +42,15 @@ def run_javadoc(repo_path: str, exec_logger=None) -> None:
     log(f"[Javadoc] {len(java_files)} arquivos candidatos")
     _live(active_skill=SKILL_ID, current_file="")
 
+    # C3: salva conteúdo pré-javadoc de cada arquivo ANTES de lançar o thread.
+    # Em caso de timeout o daemon pode ter escrito código parcial — restauramos o
+    # conteúdo salvo (não o git), preservando refatorações de fases anteriores.
+    pre_javadoc: dict[str, str] = {}
+
     for file_path in java_files:
         file_name = os.path.basename(file_path)
         try:
+            pre_javadoc[file_path] = read_file(file_path) or ""
             t = threading.Thread(
                 target=_process_one_file,
                 args=(file_path, rules, repo_path, exec_logger),
@@ -51,6 +60,11 @@ def run_javadoc(repo_path: str, exec_logger=None) -> None:
             t.join(FILE_TIMEOUT_SECS)
             if t.is_alive():
                 log(f"  [javadoc] {file_name} — timeout ({FILE_TIMEOUT_SECS}s), pulando", "WARN")
+                # Restaura o conteúdo anterior ao javadoc (preserva fases já aplicadas)
+                saved = pre_javadoc.get(file_path, "")
+                if saved:
+                    write_file(file_path, saved)
+                    log(f"  [javadoc] {file_name} — conteúdo pré-javadoc restaurado", "WARN")
                 if exec_logger:
                     exec_logger.log_file_skipped(SKILL_ID, file_name, "timeout")
         except Exception as exc:
@@ -66,6 +80,13 @@ def _process_one_file(file_path: str, rules: str, repo_path: str, exec_logger) -
     file_name = os.path.basename(file_path)
     code = read_file(file_path)
     if not code:
+        return
+
+    # C4: classes de bootstrap/configuração não devem receber Javadoc (mesma regra do method_runner)
+    if _BOOTSTRAP_RE.search(code):
+        log(f"  [javadoc] {file_name} — classe bootstrap/config, pulando")
+        if exec_logger:
+            exec_logger.log_file_skipped(SKILL_ID, file_name, "bootstrap_class")
         return
 
     if _all_public_methods_documented(code):
@@ -89,6 +110,13 @@ def _process_one_file(file_path: str, rules: str, repo_path: str, exec_logger) -
         log(f"  [javadoc] {file_name} — sem alteração")
         if exec_logger:
             exec_logger.log_file_skipped(SKILL_ID, file_name, "no_change")
+        return
+
+    # C1: verificação de integridade estrutural — LLM só pode ter adicionado comentários
+    if _strip_comments(new_code) != _strip_comments(code):
+        log(f"  [javadoc] {file_name} — LLM modificou código além dos comentários, rejeitando", "WARN")
+        if exec_logger:
+            exec_logger.log_file_skipped(SKILL_ID, file_name, "code_structure_changed")
         return
 
     write_file(file_path, new_code)
@@ -141,6 +169,17 @@ def _all_public_methods_documented(code: str) -> bool:
     if total == 0:
         return True
     return documented >= total
+
+
+def _strip_comments(code: str) -> str:
+    """Remove todos os comentários Java para comparação estrutural.
+    Permite detectar se o LLM alterou código além de adicionar /** */ blocks."""
+    # Remove comentários de bloco (/** ... */ e /* ... */)
+    stripped = re.sub(r'/\*.*?\*/', '', code, flags=re.DOTALL)
+    # Remove comentários de linha (//)
+    stripped = re.sub(r'//[^\n]*', '', stripped)
+    # Normaliza espaços para comparação robusta
+    return re.sub(r'\s+', ' ', stripped.strip())
 
 
 def _normalize(code: str) -> str:
