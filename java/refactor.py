@@ -140,6 +140,28 @@ def _categorize_build_error(output: str, prod_imports: list[str] | None = None) 
             "Check the required arguments in the record declaration inside the DEPENDENCY CONTEXT."
         )
 
+    # D: Construtor sem argumentos em classe que exige parâmetros (não-record)
+    if "constructor" in out and "cannot be applied" in out and "found:" in out:
+        required, found = "", ""
+        for line in output.splitlines():
+            if "required:" in line and not required:
+                required = line.split("required:")[-1].strip()
+            if "found:" in line and not found:
+                found = line.split("found:")[-1].strip()
+        if required:
+            return (
+                f"CONSTRUCTOR ERROR: You called the constructor with wrong arguments.\n"
+                f"  Required: {required}\n"
+                f"  Found:    {found or 'no arguments'}\n"
+                "Check the DEPENDENCY CONTEXT for the EXACT constructor signature.\n"
+                "Pass ALL required arguments — NEVER use an empty constructor if the class has none.\n"
+                "Copy each argument type verbatim from the 'Required' line above."
+            )
+        return (
+            "CONSTRUCTOR ERROR: Constructor called with wrong argument count or types.\n"
+            "Check the DEPENDENCY CONTEXT for the exact constructor signature and pass all required arguments."
+        )
+
     # Erro de enum/variável inventada
     if "cannot find symbol" in out:
         for line in output.splitlines():
@@ -226,6 +248,15 @@ def _categorize_build_error(output: str, prod_imports: list[str] | None = None) 
 
     # Tipo incompatível no retorno do mock ou assertion
     if "incompatible types" in out:
+        # A: String literal passado onde BigDecimal é esperado
+        if "string" in out and "bigdecimal" in out:
+            return (
+                "TYPE MISMATCH — BigDecimal: You passed a String literal where BigDecimal is required.\n"
+                "REPLACE every string literal with new BigDecimal(\"value\").\n"
+                "  WRONG:   someMethod(\"100.00\")  /  new Foo(\"50.00\")\n"
+                "  CORRECT: someMethod(new BigDecimal(\"100.00\"))  /  new Foo(new BigDecimal(\"50.00\"))\n"
+                "Apply this fix to ALL BigDecimal parameters in constructors and method calls."
+            )
         for line in output.splitlines():
             if "incompatible types" in line.lower():
                 return (
@@ -1296,6 +1327,16 @@ def generate_tests(repo_path: str, phase: str, rules: str,
             active_rules += (
                 "\n\n### IMPORTS PRESENT IN PRODUCTION CLASS (use as reference — do not hallucinate others)\n"
                 + "\n".join(_prod_imports) + "\n"
+            )
+
+        # C: regra preventiva — quando a classe de produção declara campos BigDecimal
+        if re.search(r'\bBigDecimal\b', original):
+            active_rules += (
+                "\n\n### BIGDECIMAL CONSTRUCTION (MANDATORY — VIOLATION CAUSES COMPILE FAILURE)\n"
+                "This class uses BigDecimal. For ALL test values involving BigDecimal:\n"
+                "  CORRECT: new BigDecimal(\"100.00\")  or  BigDecimal.valueOf(100)\n"
+                "  WRONG:   \"100.00\"  ← String literal, incompatible type, will NOT compile\n"
+                "Apply this to constructors, setters, method calls, and mock return values.\n"
             )
 
         # C1: injetar campos @Autowired quando classe usa field injection (S5 path)
