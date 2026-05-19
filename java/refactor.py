@@ -205,6 +205,23 @@ def _categorize_build_error(output: str) -> str:
             "Example: when(mock.method(any(), eq(\"value\"))).thenReturn(x)  — ALL matchers."
         )
 
+    # Classe pública com nome diferente do arquivo (class Foo in Bar.java)
+    if "should be declared in a file named" in out:
+        m = re.search(
+            r'class (\w+) is public, should be declared in a file named (\w+\.java)',
+            output,
+        )
+        if m:
+            wrong_cls, correct_file = m.group(1), m.group(2)
+            correct_cls = correct_file.replace(".java", "")
+            return (
+                f"CLASS NAME CRITICAL ERROR: You declared `public class {wrong_cls}` "
+                f"but the file is `{correct_file}`.\n"
+                f"RENAME the class to EXACTLY: `public class {correct_cls} {{`\n"
+                "Java law: the public class name MUST equal the filename. No exceptions.\n"
+                "Do NOT abbreviate, shorten, or change it in any way."
+            )
+
     # Output truncado pelo limite de tokens (reached end of file / try without catch)
     if "reached end of file while parsing" in out or (
         "'try' without 'catch'" in out and "reached end of file" in out
@@ -1091,11 +1108,37 @@ def generate_tests(repo_path: str, phase: str, rules: str,
         except Exception:
             test_dep_context = ""
 
+        # C3: calcula restrição de nome/package ANTES de construir active_rules — inserida no INÍCIO
+        _test_cls_name = test_name.replace(".java", "")
+        _test_pkg = ""
+        try:
+            _norm_tp = test_path.replace("\\", "/")
+            _java_idx = _norm_tp.find("/test/java/")
+            if _java_idx >= 0:
+                _pkg_path = _norm_tp[_java_idx + len("/test/java/"):]
+                _pkg_path = "/".join(_pkg_path.split("/")[:-1])
+                _test_pkg = _pkg_path.replace("/", ".")
+        except Exception:
+            pass
+
+        _mandatory_prefix = (
+            f"### TEST CLASS — MANDATORY NAME AND PACKAGE (HIGHEST PRIORITY — APPLY BEFORE ANYTHING ELSE)\n"
+            f"- The test class declaration MUST be EXACTLY: `public class {_test_cls_name} {{`\n"
+            f"- NEVER rename, shorten, or alter this class name in any way.\n"
+        )
+        if _test_pkg:
+            _mandatory_prefix += (
+                f"- The package declaration MUST be EXACTLY: `package {_test_pkg};`\n"
+                f"- NEVER abbreviate `{_test_pkg}` — copy the FULL package path verbatim.\n"
+                f"  (Common mistake: writing `{'.'.join(_test_pkg.split('.')[:3])}.*` instead of the full path)\n"
+            )
+        _mandatory_prefix += "\n\n"
+
         # M8: regras de complementação — LLM recebe teste existente + setup explícito + lacunas
         if complement_mode:
             setup_block = _extract_test_setup(existing_test_code)
             active_rules = (
-                f"{rules}\n\n"
+                f"{_mandatory_prefix}{rules}\n\n"
                 "### EXISTING TEST FILE (DO NOT MODIFY OR REMOVE ANY EXISTING TEST)\n"
                 f"```java\n{existing_test_code}\n```\n"
                 f"{setup_block}\n"
@@ -1119,7 +1162,7 @@ def generate_tests(repo_path: str, phase: str, rules: str,
                 "Return the COMPLETE test file: all existing content unchanged + new @Test methods at the end."
             )
         else:
-            active_rules = rules
+            active_rules = _mandatory_prefix + rules
 
         # C21: injetar semântica de record quando a classe-alvo é um record Java
         if re.search(r'\brecord\s+\w+', original):
@@ -1148,37 +1191,27 @@ def generate_tests(repo_path: str, phase: str, rules: str,
                 f"- Import: `import {_pkg}.{_cls};`\n"
                 f"Do NOT use com.example.*, com.test.*, or any invented package for {_cls}.\n"
             )
-            # C2: nome exato da classe de teste e package derivado do test_path
-            _test_cls_name = test_name.replace(".java", "")
-            _test_pkg = ""
-            try:
-                _norm_tp = test_path.replace("\\", "/")
-                _java_idx = _norm_tp.find("/test/java/")
-                if _java_idx >= 0:
-                    _pkg_path = _norm_tp[_java_idx + len("/test/java/"):]
-                    _pkg_path = "/".join(_pkg_path.split("/")[:-1])
-                    _test_pkg = _pkg_path.replace("/", ".")
-            except Exception:
-                pass
-            active_rules += (
-                f"\n\n### TEST CLASS — MANDATORY NAME AND PACKAGE (CRITICAL)\n"
-                f"- The test class declaration MUST be EXACTLY: `public class {_test_cls_name} {{`\n"
-                f"- NEVER rename, shorten, or alter this class name in any way.\n"
-                f"- Forbidden variants (examples of WRONG names): "
-                f"`{_cls}Tests`, `{_test_cls_name.replace('Model', '')}`, "
-                f"`{_test_cls_name.replace('Test', 'Spec')}` or any other variant.\n"
-            )
-            if _test_pkg:
-                active_rules += (
-                    f"- The package declaration MUST be EXACTLY: `package {_test_pkg};`\n"
-                    f"- NEVER abbreviate `{_test_pkg}` — copy the FULL package path verbatim.\n"
-                    f"  (Common mistake: writing `{'.'.join(_test_pkg.split('.')[:3])}.*` instead of the full path)\n"
-                )
         _prod_imports = re.findall(r'^import\s+[\w.]+;', original, re.MULTILINE)
         if _prod_imports:
             active_rules += (
                 "\n\n### IMPORTS PRESENT IN PRODUCTION CLASS (use as reference — do not hallucinate others)\n"
                 + "\n".join(_prod_imports) + "\n"
+            )
+
+        # C1: injetar campos @Autowired quando classe usa field injection (S5 path)
+        _autowired_fields = re.findall(
+            r'@Autowired\s+(?:private\s+)?(\w[\w<>, ]*?\s+\w+)\s*;',
+            original,
+        )
+        if _autowired_fields:
+            active_rules += (
+                "\n\n### FIELD INJECTION — MOCK SETUP (MANDATORY)\n"
+                "The class under test uses @Autowired field injection (no constructor).\n"
+                "Use @ExtendWith(MockitoExtension.class) + @InjectMocks for the class under test.\n"
+                "Declare one @Mock per injected dependency listed below:\n"
+                + "\n".join(f"  @Mock  {f};" for f in _autowired_fields) + "\n"
+                "Do NOT write a constructor or @BeforeEach that manually injects these — "
+                "Mockito does it automatically via @InjectMocks.\n"
             )
 
         # M2: classe com @Document precisa do import MongoDB explícito no teste
@@ -1274,6 +1307,21 @@ def generate_tests(repo_path: str, phase: str, rules: str,
             if not corrected_test:
                 log(f"  [{test_name}] LLM não gerou correção — encerrando reparos", "WARN")
                 break
+
+            # C2: valida nome da classe ANTES de escrever no disco
+            _expected_cls = test_name.replace(".java", "")
+            if f"class {_expected_cls}" not in corrected_test:
+                _cls_found = re.search(r'(?:public\s+)?class\s+(\w+)', corrected_test)
+                _found_name = _cls_found.group(1) if _cls_found else "UNKNOWN"
+                combined_out = (
+                    f"CLASS NAME CRITICAL ERROR: You generated `public class {_found_name}` "
+                    f"but the file MUST be named `{_expected_cls}`.\n"
+                    f"RENAME the class declaration to EXACTLY: `public class {_expected_cls} {{`\n"
+                    "Java law: the public class name MUST equal the filename. No exceptions.\n"
+                    "Do NOT abbreviate, shorten, or change the class name in any way.\n\n"
+                ) + combined_out[-1000:]
+                success = False
+                continue  # não escreve o arquivo — força novo reparo com erro de classe
 
             write_file(test_path, corrected_test)
             test_code = corrected_test
