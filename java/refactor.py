@@ -1304,12 +1304,29 @@ def generate_tests(repo_path: str, phase: str, rules: str,
             original,
         )
         if _autowired_fields:
+            # S4: resolve import exato para cada @Mock — só para tipos simples (sem generics)
+            _prod_import_map: dict[str, str] = {}
+            for _imp in _prod_imports:
+                _m = re.match(r'import\s+([\w.]+);', _imp)
+                if _m:
+                    _prod_import_map[_m.group(1).split(".")[-1]] = _imp
+
+            _mock_lines: list[str] = []
+            for _field in _autowired_fields:
+                _type_name = _field.split()[0]
+                _mock_lines.append(f"  @Mock  {_field};")
+                if "<" not in _type_name:
+                    _resolved = _prod_import_map.get(_type_name) or _JDK_IMPORT_MAP.get(_type_name)
+                    if _resolved:
+                        _mock_lines.append(f"  // Required import: {_resolved}")
+
             active_rules += (
                 "\n\n### FIELD INJECTION — MOCK SETUP (MANDATORY)\n"
                 "The class under test uses @Autowired field injection (no constructor).\n"
                 "Use @ExtendWith(MockitoExtension.class) + @InjectMocks for the class under test.\n"
-                "Declare one @Mock per injected dependency listed below:\n"
-                + "\n".join(f"  @Mock  {f};" for f in _autowired_fields) + "\n"
+                "Declare one @Mock per injected dependency listed below "
+                "(each line shows the @Mock and its required import):\n"
+                + "\n".join(_mock_lines) + "\n"
                 "Do NOT write a constructor or @BeforeEach that manually injects these — "
                 "Mockito does it automatically via @InjectMocks.\n"
             )
