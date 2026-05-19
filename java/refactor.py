@@ -999,10 +999,14 @@ def generate_tests(repo_path: str, phase: str, rules: str,
         if skip:
             continue
 
-        # S2: pula tipos estruturais (records, interfaces, @Document/@Entity, DTOs)
-        # que as fases LLM já ignoram — evita gerar testes que falham por ausência de lógica
-        from java.llm_runner import _is_structural_type
-        if _is_structural_type(original, main_file):
+        # S2 (corrigido): pula apenas interfaces puras — @Document/@Entity ainda têm
+        # getters/setters/construtores que precisam de cobertura de testes.
+        # should_skip() já filtra interfaces JPA repositories e @SpringBootApplication.
+        # Filtro adicional: interfaces não-repository (sem herança de Repository).
+        if re.search(r'(?:public\s+)?interface\s+\w+', original) and \
+                not re.search(r'extends\s+\w*Repository\w*\s*<', original):
+            # Interface pura sem implementação — should_skip pode não ter capturado
+            # (ex: service interfaces sem "Repository" no nome)
             continue
 
         test_path = _test_path_for(main_file, repo_path)
@@ -1020,14 +1024,20 @@ def generate_tests(repo_path: str, phase: str, rules: str,
 
         # M7: deferred skip — class de produção com field injection (@Autowired sem construtor)
         if _has_field_injection_without_constructor(original):
-            # S5: se solid-dip já atingiu permanent_skip, não há mais chance de conversão
-            # para constructor injection — gera o teste diretamente com @InjectMocks
-            if get_failed_tracker().is_permanent_skip(main_file, "solid-dip"):
+            # S5 (corrigido): desbloqueia se solid-dip nunca vai processar este arquivo.
+            # Dois casos em que solid-dip não vai agir:
+            #   a) permanent_skip: já tentou 3x e falhou
+            #   b) no_new_instantiation: pré-filtro elimina antes do LLM (nunca acumula falhas)
+            _dip_permanent   = get_failed_tracker().is_permanent_skip(main_file, "solid-dip")
+            _dip_prefiltered = not bool(re.search(r'\bnew\s+[A-Z]\w+\s*\(', original))
+            if _dip_permanent or _dip_prefiltered:
                 log(
-                    f"  {test_name}: solid-dip permanent_skip — gerando teste com field injection",
+                    f"  {test_name}: solid-dip não aplicável "
+                    f"({'permanent_skip' if _dip_permanent else 'no_new_instantiation'}) "
+                    f"— gerando teste com @InjectMocks",
                     "WARN"
                 )
-                # Não dá continue — segue para geração normal com @InjectMocks
+                # Não dá continue — Mockito suporta field injection via @InjectMocks
             else:
                 log(
                     f"  {test_name}: DEFERRED — field injection detectada "
