@@ -39,8 +39,88 @@ MAX_TEST_FILE_TIMEOUT_S = 1200  # 20 min máximo por arquivo de teste — escala
 
 _REASON_NO_CHANGE = "no_change"  # sinal: modelo confirmou que não há alterações
 
+# S1/S2: mapa de tipos JDK que LLMs frequentemente usam sem importar
+_JDK_IMPORT_MAP: dict[str, str] = {
+    "BigDecimal":    "import java.math.BigDecimal;",
+    "BigInteger":    "import java.math.BigInteger;",
+    "LocalDate":     "import java.time.LocalDate;",
+    "LocalDateTime": "import java.time.LocalDateTime;",
+    "LocalTime":     "import java.time.LocalTime;",
+    "ZonedDateTime": "import java.time.ZonedDateTime;",
+    "OffsetDateTime":"import java.time.OffsetDateTime;",
+    "Instant":       "import java.time.Instant;",
+    "Duration":      "import java.time.Duration;",
+    "Period":        "import java.time.Period;",
+    "UUID":          "import java.util.UUID;",
+    "ArrayList":     "import java.util.ArrayList;",
+    "LinkedList":    "import java.util.LinkedList;",
+    "HashMap":       "import java.util.HashMap;",
+    "LinkedHashMap": "import java.util.LinkedHashMap;",
+    "HashSet":       "import java.util.HashSet;",
+    "LinkedHashSet": "import java.util.LinkedHashSet;",
+    "Collections":   "import java.util.Collections;",
+    "Arrays":        "import java.util.Arrays;",
+    "Optional":      "import java.util.Optional;",
+    "Objects":       "import java.util.Objects;",
+    "Stream":        "import java.util.stream.Stream;",
+    "Collectors":    "import java.util.stream.Collectors;",
+    "AtomicInteger": "import java.util.concurrent.atomic.AtomicInteger;",
+    "AtomicLong":    "import java.util.concurrent.atomic.AtomicLong;",
+}
 
-def _categorize_build_error(output: str) -> str:
+
+def _auto_inject_missing_imports(test_code: str, prod_imports: list[str]) -> str:
+    """
+    S1: Após geração LLM, injeta deterministicamente imports ausentes no teste.
+    Cruza nomes de classe usados no código com prod_imports (do fonte de produção)
+    e _JDK_IMPORT_MAP. Não envolve LLM — é uma correção estrutural pura.
+    """
+    # Monta mapa nome-curto → import completo a partir dos imports de produção
+    prod_map: dict[str, str] = {}
+    for imp in prod_imports:
+        m = re.match(r'import\s+([\w.]+);', imp)
+        if m:
+            short = m.group(1).split(".")[-1]
+            prod_map[short] = imp
+
+    # Coleta imports que já existem no teste gerado
+    existing_imports = set(re.findall(r'^import\s+[\w.*]+;', test_code, re.MULTILINE))
+    existing_short: set[str] = set()
+    for imp in existing_imports:
+        m = re.match(r'import\s+([\w.]+(?:\.\*)?);', imp)
+        if m:
+            existing_short.add(m.group(1).split(".")[-1])
+
+    # Detecta todos os nomes CamelCase usados no corpo do teste
+    used_classes = set(re.findall(r'\b([A-Z][a-zA-Z0-9]+)\b', test_code))
+
+    to_inject: list[str] = []
+    for cls in sorted(used_classes):
+        if cls in existing_short:
+            continue
+        if cls in prod_map:
+            to_inject.append(prod_map[cls])
+        elif cls in _JDK_IMPORT_MAP:
+            to_inject.append(_JDK_IMPORT_MAP[cls])
+
+    if not to_inject:
+        return test_code
+
+    # Injeta após o último import existente — ou após o package se não há imports
+    last_import = None
+    for m in re.finditer(r'^import\s+[\w.*]+;', test_code, re.MULTILINE):
+        last_import = m
+    if last_import:
+        pos = last_import.end()
+        return test_code[:pos] + "\n" + "\n".join(sorted(set(to_inject))) + test_code[pos:]
+    pkg = re.search(r'^package\s+[\w.]+;', test_code, re.MULTILINE)
+    if pkg:
+        pos = pkg.end()
+        return test_code[:pos] + "\n\n" + "\n".join(sorted(set(to_inject))) + test_code[pos:]
+    return test_code
+
+
+def _categorize_build_error(output: str, prod_imports: list[str] | None = None) -> str:
     """Analisa o erro Maven e retorna instrução de reparo direcionada."""
     out = output.lower()
 
@@ -77,6 +157,26 @@ def _categorize_build_error(output: str) -> str:
                         "Check the exact signatures of the source class and use only real methods."
                     )
                 if "class" in sym:
+                    cls_name = sym.replace("class", "").strip()
+                    # S2: busca import exato no mapa de imports de produção ou JDK
+                    if prod_imports:
+                        for imp in prod_imports:
+                            m = re.match(r'import\s+([\w.]+);', imp)
+                            if m and m.group(1).split(".")[-1] == cls_name:
+                                return (
+                                    f"IMPORT ERROR: Class `{cls_name}` is missing its import.\n"
+                                    f"ADD THIS EXACT LINE to your import block (copy verbatim):\n"
+                                    f"  {imp}\n"
+                                    "Do NOT modify this import in any way."
+                                )
+                    if cls_name in _JDK_IMPORT_MAP:
+                        jdk_imp = _JDK_IMPORT_MAP[cls_name]
+                        return (
+                            f"IMPORT ERROR: Class `{cls_name}` is missing its import.\n"
+                            f"ADD THIS EXACT LINE to your import block (copy verbatim):\n"
+                            f"  {jdk_imp}\n"
+                            "Do NOT modify this import in any way."
+                        )
                     return (
                         f"IMPORT ERROR: Class '{sym}' not found.\n"
                         "Add the correct import. Use only classes that exist in the project."
@@ -1252,6 +1352,9 @@ def generate_tests(repo_path: str, phase: str, rules: str,
             reporter.record_skipped(phase, test_name, reason)
             continue
 
+        # S1: injeta imports ausentes antes de gravar no disco
+        test_code = _auto_inject_missing_imports(test_code, _prod_imports)
+
         os.makedirs(os.path.dirname(test_path), exist_ok=True)
         write_file(test_path, test_code)
 
@@ -1276,7 +1379,7 @@ def generate_tests(repo_path: str, phase: str, rules: str,
                 break
 
             if not success:
-                repair_hint = _categorize_build_error(combined_out)
+                repair_hint = _categorize_build_error(combined_out, _prod_imports)
                 error_history.append(f"Attempt {attempt + 1}: {repair_hint}")
                 log(f"  [{test_name}] Reparo {attempt + 1}/{MAX_VALIDATOR_RETRIES}: {repair_hint[:80]}...", "WARN")
                 history_block = (
@@ -1323,6 +1426,8 @@ def generate_tests(repo_path: str, phase: str, rules: str,
                 success = False
                 continue  # não escreve o arquivo — força novo reparo com erro de classe
 
+            # S1: injeta imports ausentes no código corrigido antes de gravar
+            corrected_test = _auto_inject_missing_imports(corrected_test, _prod_imports)
             write_file(test_path, corrected_test)
             test_code = corrected_test
             success, combined_out, coverage, missed_lines = maven_test_with_coverage(repo_path, file_name)

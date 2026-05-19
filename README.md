@@ -183,20 +183,39 @@ memory/cache.py
 
 ## Skills LLM
 
-Todas em `~/.claude/skills/<nome>/SKILL.md`. Carregadas via `load_skill(name, section="LLM INSTRUCTIONS")`.
+Todas em `~/.claude/skills/<nome>/SKILL.md`. Carregadas via `load_skill(name, section="LLM INSTRUCTIONS")` e injetadas como instrução de prompt nas LLMs locais (Ollama).
 
-| Fase | Skill | detect_pattern | method_level | class_level | skip_compression |
-|------|-------|---------------|:---:|:---:|:---:|
-| 09 | `java-guard-clauses` | `nested_if` (≥3) | ✓ | — | — |
-| 10 | `java-method-extraction` | `long_method` (>30 linhas) | ✓ | — | — |
-| 11 | `java-solid-dip` | `concrete_new` | — | ✓ | ✓ |
-| 12 | `java-controller-lean` | `controller_logic` | ✓ | — | — |
-| 13 | `java-flow-refactor` | — | — | — | — |
-| 14 | `java-dry-extraction` | — | — | — | — |
-| 15 | `java-javadoc` | — | — | — | — |
-| AUDIT | `java-tdd-unit-test` | — | — | — | — |
+### Mapa de execução
 
-**solid-dip** envia a classe completa (`skip_compression: true`) e tem proibições explícitas: nunca criar interfaces inexistentes, nunca alterar assinaturas de métodos, nunca adicionar lógica — apenas substituir `new ConcreteClass()` por injeção via construtor.
+| Momento | Skill | Onde é carregada | Trigger |
+|---------|-------|-----------------|---------|
+| Toda chamada de refatoração | `java-refactor-context` | `ai/prompt.py → _build_task()` | sempre — base de instrução para qualquer fase LLM |
+| `AUDIT_COVERAGE` (pré-refatoração) | `java-tdd-unit-test` | `java/refactor.py → generate_tests()` | cobertura JaCoCo < 90% |
+| Fase 09 | `java-guard-clauses` | `method_runner._run_method_level()` | detecta ≥ 3 níveis de `if` aninhado |
+| Fase 10 | `java-method-extraction` | `method_runner._run_method_level()` | detecta método > 30 linhas |
+| Fase 11 | `java-solid-dip` | `method_runner._run_class_level()` | detecta `new ConcreteClass()` hardcoded |
+| Fase 12 | `java-controller-lean` | `method_runner._run_method_level()` | detecta lógica de negócio em `@RestController` |
+| Fase 13 | `java-flow-refactor` | `flow_runner.py` | todos os endpoints mapeados pelo `flow_mapper` |
+| Fase 14 | `java-dry-extraction` | `flow_runner.dry_check()` | grupos de arquivos com padrões repetidos |
+| Fase 15 | `java-javadoc` | `javadoc_runner.py` | método público sem `/** */` detectado |
+| Repair loop (fases 09–14) | `java-repair-guide` | `java/refactor.py → call_ai_with_correction()` | compilação Maven falha após geração LLM |
+
+### Parâmetros das fases LLM (09–12)
+
+| Skill | yml | method_level | class_level | skip_compression | detect_pattern |
+|-------|-----|:---:|:---:|:---:|----------------|
+| `java-guard-clauses` | `09_guard_clauses.yml` | ✓ | — | — | `nested_if` |
+| `java-method-extraction` | `10_method_extraction.yml` | ✓ | — | — | `long_method` |
+| `java-solid-dip` | `11_solid_dip.yml` | — | ✓ | ✓ | `concrete_new` |
+| `java-controller-lean` | `12_controller_lean.yml` | ✓ | — | — | `controller_logic` |
+
+> **solid-dip** usa `skip_compression: true` — envia a classe inteira ao LLM (sem compressão de métodos) para preservar o contexto completo de dependências. Proibições absolutas: nunca criar interfaces, nunca alterar assinaturas, nunca adicionar lógica — apenas substituir `new ConcreteClass()` por injeção via construtor.
+
+> **java-refactor-context** é a skill de contexto base: toda chamada de refatoração LLM (fases 09–14 e repair loop) começa com as instruções dessa skill como sistema de regras globais, antes das regras específicas da fase.
+
+### Tipos ignorados em todas as fases LLM
+
+`_is_structural_type()` em `llm_runner.py` detecta e emite `FILE_SKIPPED` (laranja neon no dashboard) para: records, interfaces, `@Entity`, `@Document`, `@Table`, `*Dto.java`, `*DTO.java`, `*Request.java`, `*Response.java`, qualquer arquivo em `/dto/`. Zero tokens consumidos nesses tipos.
 
 ---
 
