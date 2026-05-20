@@ -272,6 +272,7 @@ python3 -m http.server 8000
 - **Javadoc Retry (J1)**: quando `neural-chat:7b` (MODEL_DOC) modifica código além de comentários, `javadoc_runner.py` executa retry com `MODEL_STRUCT` (qwen2.5-coder:7b, temp=0.05) antes de rejeitar — reduz de ~11 para ~2–3 falhas `code_structure_changed` por ciclo
 - **Constructor Call Hint (C1)**: `_extract_simplified_header()` em `context.py` gera `// CONSTRUCTOR CALL: new Foo(a, b)` para classes regulares com construtor explícito (não só records) — o LLM usa esse hint ao instanciar objetos nos testes, eliminando chamadas `new Foo()` sem args em `@Document`/`@Entity`
 - **Repair-to-DepContext Bridge (R1)**: `_categorize_build_error()` no RECORD/CONSTRUCTOR ERROR agora instrui explicitamente: "Look in DEPENDENCY CONTEXT for `// CONSTRUCTOR CALL:` and copy that EXACT call" — fecha o loop entre o hint do dep_context (C1) e o reparo do erro (D/R1)
+- **Test Timeout Margin (T1)**: `TIMEOUT_TEST` aumentado de 300s para 420s — o custo real por arquivo é ~50s (construção do KV cache do prompt no Ollama) + ~250s (geração), totalizando ~300s. Com o limite anterior o attempt 1 expirava sistematicamente para cada arquivo novo; o attempt 2 sempre sucedia porque o KV cache já estava computado. Com 420s o attempt 1 passa com margem mesmo para prompts maiores ou variação de hardware
 
 ---
 
