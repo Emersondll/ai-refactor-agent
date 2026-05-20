@@ -24,7 +24,7 @@ USE_CLAUDE_FALLBACK = os.getenv("USE_CLAUDE_FALLBACK", "true").lower() == "true"
 FLOW_MODE           = os.getenv("FLOW_MODE", "false").lower() == "true"
 
 TIMEOUT      = 600   # refatoração — tempo máximo por chamada Ollama
-TIMEOUT_TEST = 300   # geração de testes — 5 min por chamada; dá espaço ao gemma4 e 14b sem bloquear timeout de arquivo
+TIMEOUT_TEST = 420   # geração de testes — 7 min por chamada; cobre ~50s KV cache + ~250s geração (gemma4 9B) com margem
 MAX_RETRIES  = 2
 
 # ---------------------------------------------------------------------------
