@@ -248,7 +248,24 @@ def _categorize_build_error(output: str, prod_imports: list[str] | None = None) 
                             "  ONE change only."
                         )
 
+                    # S1: actual é null — instrução específica para assertNull()
+                    # Evita ambiguidade: LLM não deve usar assertEquals("null", ...) nem assertEquals(null, ...)
+                    if _actual_from_code == "null":
+                        return (
+                            f"ASSERTION WRONG EXPECTED VALUE:\n"
+                            f"  Your test expects: <{_expected_in_test}>\n"
+                            f"  Actual return value: <null> (Java null reference)\n\n"
+                            "SURGICAL FIX — change ONLY the assertion:\n"
+                            f"  REPLACE the assertion containing '{_expected_in_test}' "
+                            "with assertNull(expression).\n"
+                            "  NEVER use assertEquals(\"null\", ...) — that compares a String, not null.\n"
+                            "  NEVER use assertEquals(null, ...) — use assertNull() instead.\n"
+                            "  Do NOT change inputs, method calls, imports, or any other code.\n"
+                            "  ONE LINE CHANGE — nothing else."
+                        )
+
                     # Caso geral: substitui apenas o valor esperado
+                    # S2: nota de desambiguação para null ao final — previne confusão se actual vier como "null"
                     return (
                         f"ASSERTION WRONG EXPECTED VALUE:\n"
                         f"  Your test expects: <{_expected_in_test}>\n"
@@ -257,7 +274,9 @@ def _categorize_build_error(output: str, prod_imports: list[str] | None = None) 
                         f"  Find the assertion containing '{_expected_in_test}' "
                         f"and replace it with '{_actual_from_code}'.\n"
                         f"  Do NOT modify inputs, method calls, imports, or any other code.\n"
-                        f"  ONE LINE CHANGE — nothing else."
+                        f"  ONE LINE CHANGE — nothing else.\n"
+                        "NOTE: if the actual value is Java's null, use assertNull(...) — "
+                        "NEVER assertEquals(\"null\", ...) which compares a String."
                     )
 
                 # Sem padrão extraível — fallback genérico
@@ -1436,6 +1455,16 @@ def generate_tests(repo_path: str, phase: str, rules: str,
             "\n\n### IMPORT PROHIBITION\n"
             "For project-specific types: derive import paths ONLY from ### IMPORTS PRESENT IN PRODUCTION CLASS.\n"
             "If a type is not listed there and is not a standard JDK or Mockito/JUnit type, do NOT import it.\n"
+        )
+
+        # S3: regra preventiva para testes de campos nulos — evita que o LLM use enum values
+        # onde o método retorna null, causando falha do tipo "expected: <ACC> but was: <null>".
+        active_rules += (
+            "\n\n### NULL ASSERTIONS (MANDATORY)\n"
+            "When a test passes null as input for a field, the method may return null for that field.\n"
+            "In that case ALWAYS use assertNull(result.getField()) — NEVER assertEquals(EnumValue, result.getField()).\n"
+            "NEVER invent a non-null expected value for a field whose input was null unless the production code "
+            "explicitly defines a non-null default for that case.\n"
         )
 
         file_start_time = time.time()
