@@ -110,7 +110,7 @@ def _extract_simplified_header(code: str, full_name: str) -> str:
     is_enum = bool(re.search(r'\benum\b', code))
     is_record = bool(re.search(r'\brecord\b', code))
 
-    # Pre-extract record constructor hint to avoid @JsonProperty confusion
+    # Pre-extract constructor call hint (records and regular classes)
     constructor_hint = ""
     if is_record:
         record_match = re.search(r'\brecord\s+(\w+)\s*\(([^)]+)\)', code, re.DOTALL)
@@ -130,6 +130,33 @@ def _extract_simplified_header(code: str, full_name: str) -> str:
                     f"    // CONSTRUCTOR CALL: new {class_name}("
                     + ", ".join(param_names) + ")"
                 )
+    elif not is_enum:
+        # C1: classes regulares com construtor explícito também recebem CONSTRUCTOR CALL hint.
+        # Evita que o LLM invoque new MerchantCategoryCodesDocument() sem argumentos.
+        # Extrai o nome da classe para validar que o ctor_match é realmente um construtor.
+        class_name_match = re.search(r'\bclass\s+(\w+)', code)
+        if class_name_match:
+            _cls = class_name_match.group(1)
+            # Construtor: mesmo nome que a classe, com pelo menos um parâmetro ({3,} = mín. 1 tipo + nome)
+            ctor_match = re.search(
+                r'(?:public|protected)\s+' + re.escape(_cls) + r'\s*\(([^)]{3,})\)',
+                code, re.DOTALL
+            )
+            if ctor_match:
+                params_raw = ctor_match.group(1).replace('\n', ' ')
+                params = [p.strip() for p in params_raw.split(',') if p.strip()]
+                param_names = []
+                for p in params:
+                    words = p.split()
+                    if words:
+                        last = words[-1].rstrip(')')
+                        if last and last.isidentifier():
+                            param_names.append(last)
+                if param_names:
+                    constructor_hint = (
+                        f"    // CONSTRUCTOR CALL: new {_cls}("
+                        + ", ".join(param_names) + ")"
+                    )
 
     lines = code.splitlines()
     header_lines = []

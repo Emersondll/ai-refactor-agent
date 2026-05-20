@@ -131,13 +131,16 @@ def _categorize_build_error(output: str, prod_imports: list[str] | None = None) 
                 args = line.split("required:")[-1].strip()
                 return (
                     f"RECORD CONSTRUCTOR ERROR: Constructor called without required arguments.\n"
-                    f"Required arguments: {args}\n"
-                    "ALWAYS use the canonical constructor with ALL declared arguments. "
-                    "NEVER use an empty constructor for records — records have no default constructor."
+                    f"Required argument types: {args}\n\n"
+                    "FIX: Look in the DEPENDENCY CONTEXT section for the line:\n"
+                    "  // CONSTRUCTOR CALL: new RecordName(param1, param2, ...)\n"
+                    "Copy that EXACT call as your instantiation template — use the real param names shown there.\n"
+                    "NEVER use an empty constructor for records — records have no default no-arg constructor."
                 )
         return (
             "RECORD CONSTRUCTOR ERROR: The record constructor was called incorrectly.\n"
-            "Check the required arguments in the record declaration inside the DEPENDENCY CONTEXT."
+            "Look in the DEPENDENCY CONTEXT for the line '// CONSTRUCTOR CALL: new ...' "
+            "and use that EXACT call — pass ALL declared fields in order."
         )
 
     # D: Construtor sem argumentos em classe que exige parâmetros (não-record)
@@ -152,14 +155,16 @@ def _categorize_build_error(output: str, prod_imports: list[str] | None = None) 
             return (
                 f"CONSTRUCTOR ERROR: You called the constructor with wrong arguments.\n"
                 f"  Required: {required}\n"
-                f"  Found:    {found or 'no arguments'}\n"
-                "Check the DEPENDENCY CONTEXT for the EXACT constructor signature.\n"
-                "Pass ALL required arguments — NEVER use an empty constructor if the class has none.\n"
-                "Copy each argument type verbatim from the 'Required' line above."
+                f"  Found:    {found or 'no arguments'}\n\n"
+                "FIX: Look in the DEPENDENCY CONTEXT section for the line:\n"
+                "  // CONSTRUCTOR CALL: new ClassName(param1, param2, ...)\n"
+                "Use that EXACT call — pass ALL required arguments in the shown order.\n"
+                "NEVER call a constructor with no arguments if the class requires them."
             )
         return (
             "CONSTRUCTOR ERROR: Constructor called with wrong argument count or types.\n"
-            "Check the DEPENDENCY CONTEXT for the exact constructor signature and pass all required arguments."
+            "Look in the DEPENDENCY CONTEXT for the '// CONSTRUCTOR CALL:' hint "
+            "and use that EXACT instantiation — pass all required arguments."
         )
 
     # Erro de enum/variável inventada

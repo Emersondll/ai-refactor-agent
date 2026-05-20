@@ -20,7 +20,8 @@ import threading
 from core.logger import log
 from core.live_state import update as _live
 from core.utils import read_file, write_file, run_cmd, load_skill
-from ai.model import call_ai
+from ai.model import call_ai, call_model
+from ai.sanitizer import clean_output
 from java.refactor import get_java_files
 from java.compiler import ENV_WRAPPER
 
@@ -114,13 +115,33 @@ def _process_one_file(file_path: str, rules: str, repo_path: str, exec_logger) -
 
     # C1: verificação de integridade estrutural — LLM só pode ter adicionado comentários
     if _strip_comments(new_code) != _strip_comments(code):
-        log(f"  [javadoc] {file_name} — LLM modificou código além dos comentários, rejeitando", "WARN")
-        if exec_logger:
-            exec_logger.log_file_skipped(SKILL_ID, file_name, "code_structure_changed")
-        # S3: acumula no FailedFilesTracker → permanent_skip após 3 ciclos consecutivos
-        from java.refactor import get_failed_tracker as _get_ft
-        _get_ft().record(file_path, SKILL_ID, "code_structure_changed")
-        return
+        log(f"  [javadoc] {file_name} — LLM modificou código além dos comentários, tentando modelo code-specialized...", "WARN")
+
+        # J1: retry com MODEL_STRUCT (qwen2.5-coder:7b) antes de rejeitar — neural-chat:7b
+        # modifica código sistematicamente; código-especializado respeita melhor o scope.
+        from config import MODEL_STRUCT
+        from ai.prompt import build_prompt
+        _retry_rules = (
+            rules + "\n\n### CRITICAL: YOUR PREVIOUS ATTEMPT WAS REJECTED\n"
+            "You modified code beyond adding Javadoc comments — this is FORBIDDEN.\n"
+            "Add ONLY `/** ... */` blocks. Every method body, signature, import, "
+            "field declaration, and blank line must remain byte-for-byte identical.\n"
+        )
+        _retry_prompt = build_prompt(code, _retry_rules, "refactor", file_name)
+        _raw2, _ = call_model(MODEL_STRUCT, _retry_prompt, temperature=0.05, num_predict=4096)
+        _retry_code = clean_output(_raw2)
+
+        if _retry_code and _strip_comments(_retry_code) == _strip_comments(code):
+            log(f"  [javadoc] {file_name} — retry com {MODEL_STRUCT} aceito ✓", "OK")
+            new_code = _retry_code
+        else:
+            log(f"  [javadoc] {file_name} — retry também modificou código, rejeitando", "WARN")
+            if exec_logger:
+                exec_logger.log_file_skipped(SKILL_ID, file_name, "code_structure_changed")
+            # S3: acumula no FailedFilesTracker → permanent_skip após 3 ciclos consecutivos
+            from java.refactor import get_failed_tracker as _get_ft
+            _get_ft().record(file_path, SKILL_ID, "code_structure_changed")
+            return
 
     write_file(file_path, new_code)
     rc, _, _ = run_cmd(ENV_WRAPPER.format("mvn compile -q"), cwd=repo_path)
