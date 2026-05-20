@@ -208,6 +208,25 @@ def main():
                     ))):
                         exec_logger.log_file_accepted(skill_id, _fname, "+community")
 
+        # S5: segunda passagem de testes para classes com field injection liberadas pelo solid-dip.
+        # Na primeira passagem (AUDIT_COVERAGE), M7 adia classes que têm @Autowired sem construtor
+        # mas também possuem `new ConcreteClass()` — esperando que solid-dip converta o construtor.
+        # Aqui relemos o arquivo de produção já modificado; M7 não vai mais adiar essas classes.
+        # Classes já cobertas (≥90%) são puladas por M8 sem custo adicional.
+        log("S5: Re-auditando cobertura para classes liberadas pelo solid-dip...", "PHASE")
+        exec_logger.log_phase_start(
+            "AUDIT_COVERAGE_POST_DIP",
+            "Geração de testes pós-solid-dip (classes com field injection convertidas)"
+        )
+        from core.utils import load_skill as _load_s5
+        _rules_s5 = _load_s5("java-tdd-unit-test", section="LLM INSTRUCTIONS") or (
+            "Generate comprehensive JUnit 5 + Mockito unit tests to increase coverage above 90%.\n"
+            "Cover: happy path, edge cases, and error/exception scenarios.\n"
+            "Test only the CURRENT behavior of the code — not what it should do in the future.\n"
+            "Use only symbols (methods, enums, constructors) that exist in the source class."
+        )
+        generate_tests(repo_path, "post_solid_dip_coverage", _rules_s5, reporter, exec_logger)
+
     # --- Sanitização Final ---
     log("Iniciando Sanitização Final...", "PHASE")
     exec_logger.log_phase_start("SANITIZATION", "Limpando imports e código morto")

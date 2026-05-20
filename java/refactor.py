@@ -219,11 +219,47 @@ def _categorize_build_error(output: str, prod_imports: list[str] | None = None) 
     if "assertionerror" in out or "expected:" in out:
         for line in output.splitlines():
             if "expected:" in line or "but was:" in line:
+                detail = line.strip()
+
+                # G1: extrai expected/actual direto do erro Maven — instrução cirúrgica
+                # Cobre tanto BigDecimal (50.00 vs 5.00) quanto qualquer outro mismatch
+                _m_vals = re.search(
+                    r'expected:\s*<([^>]*)>\s*but was:\s*<([^>]*)>', detail
+                )
+                if _m_vals:
+                    _expected_in_test = _m_vals.group(1)
+                    _actual_from_code = _m_vals.group(2)
+
+                    # F4: null vs empty string — caso especial com instrução de substituição de método
+                    if _expected_in_test == "null" and _actual_from_code == "":
+                        return (
+                            "ASSERTION WRONG EXPECTED VALUE:\n"
+                            "  Your test expects: <null>\n"
+                            "  Actual return value: <\"\"> (empty string)\n\n"
+                            "SURGICAL FIX — change ONLY the assertion:\n"
+                            "  REPLACE assertNull(...) with assertEquals(\"\", result) "
+                            "or assertTrue(result.isEmpty()).\n"
+                            "  Do NOT change inputs, method calls, imports, or any other code.\n"
+                            "  ONE change only."
+                        )
+
+                    # Caso geral: substitui apenas o valor esperado
+                    return (
+                        f"ASSERTION WRONG EXPECTED VALUE:\n"
+                        f"  Your test expects: <{_expected_in_test}>\n"
+                        f"  Actual return value: <{_actual_from_code}>\n\n"
+                        f"SURGICAL FIX — change ONLY the expected value in the assertion:\n"
+                        f"  Find the assertion containing '{_expected_in_test}' "
+                        f"and replace it with '{_actual_from_code}'.\n"
+                        f"  Do NOT modify inputs, method calls, imports, or any other code.\n"
+                        f"  ONE LINE CHANGE — nothing else."
+                    )
+
+                # Sem padrão extraível — fallback genérico
                 return (
                     f"ASSERTION ERROR: The expected value in the test is wrong.\n"
-                    f"Detail: {line.strip()}\n"
-                    "Run the method mentally with the test input to find the ACTUAL return value.\n"
-                    "Fix assertEquals/assertThat to match what the method ACTUALLY returns NOW.\n"
+                    f"Detail: {detail}\n"
+                    "Fix assertEquals/assertThat to match what the method ACTUALLY returns.\n"
                     "Do NOT guess what 'should' happen — test current behavior, not desired behavior."
                 )
         return (
@@ -1262,6 +1298,7 @@ def generate_tests(repo_path: str, phase: str, rules: str,
                 f"- The package declaration MUST be EXACTLY: `package {_test_pkg};`\n"
                 f"- NEVER abbreviate `{_test_pkg}` — copy the FULL package path verbatim.\n"
                 f"  (Common mistake: writing `{'.'.join(_test_pkg.split('.')[:3])}.*` instead of the full path)\n"
+                f"- NEVER use com.example.*, com.test.*, com.demo.*, or any invented package.\n"
             )
         _mandatory_prefix += "\n\n"
 
@@ -1309,24 +1346,30 @@ def generate_tests(repo_path: str, phase: str, rules: str,
                 "- Two records with the same field values are equal via assertEquals without extra setup\n"
             )
 
-        # C22: injetar package e imports da classe de produção no prompt
-        _pkg_m   = re.search(r'^(package\s+[\w.]+;)', original, re.MULTILINE)
-        _cls_m   = re.search(r'(?:public\s+)?(?:class|interface|record|enum)\s+(\w+)', original)
-        if _pkg_m and _cls_m:
-            _pkg = _pkg_m.group(1).replace("package ", "").replace(";", "").strip()
-            _cls = _cls_m.group(1)
-            active_rules += (
-                f"\n\n### CLASS UNDER TEST — MANDATORY PACKAGE CONSTRAINT\n"
-                f"- Class name: `{_cls}`\n"
-                f"- Package: `{_pkg_m.group(1)}`\n"
-                f"- Import: `import {_pkg}.{_cls};`\n"
-                f"Do NOT use com.example.*, com.test.*, or any invented package for {_cls}.\n"
-            )
         _prod_imports = re.findall(r'^import\s+[\w.]+;', original, re.MULTILINE)
+
+        # F1: self-import — a classe sob teste não importa a si mesma, mas o teste precisa importá-la.
+        # Derivamos o import exato do package da classe de produção + nome do arquivo.
+        _prod_pkg_m = re.search(r'^package\s+([\w.]+);', original, re.MULTILINE)
+        _prod_cls_name = file_name.replace(".java", "")
+        _self_import: str | None = (
+            f"import {_prod_pkg_m.group(1)}.{_prod_cls_name};" if _prod_pkg_m else None
+        )
+        # Lista ampliada para S1: prod_imports + self-import (garante que MerchantDocument,
+        # TransactionController etc. sejam sempre injetados mesmo após reparos do LLM)
+        _s1_imports = list(_prod_imports)
+        if _self_import:
+            _s1_imports.append(_self_import)
+
         if _prod_imports:
             active_rules += (
                 "\n\n### IMPORTS PRESENT IN PRODUCTION CLASS (use as reference — do not hallucinate others)\n"
                 + "\n".join(_prod_imports) + "\n"
+            )
+        if _self_import:
+            active_rules += (
+                f"\n### SELF-IMPORT (MANDATORY — always include this line in the test file)\n"
+                f"  {_self_import}\n"
             )
 
         # C: regra preventiva — quando a classe de produção declara campos BigDecimal
@@ -1382,13 +1425,12 @@ def generate_tests(repo_path: str, phase: str, rules: str,
                 "Do NOT omit it — the class will not compile without it.\n"
             )
 
-        # Proibição incondicional de packages fictícios — aplicada em todas as gerações e reparos
+        # P3: IMPORT PROHIBITION simplificado — "Do NOT use com.example.*" já está no _mandatory_prefix.
+        # Este bloco cobre apenas a proibição de inventar paths de import para tipos do projeto.
         active_rules += (
-            "\n\n### PACKAGE PROHIBITION (CRITICAL — ANY VIOLATION CAUSES COMPILE FAILURE)\n"
-            "NEVER use com.example.*, com.test.*, com.demo.*, or ANY package not present "
-            "in the ### IMPORTS PRESENT IN PRODUCTION CLASS section above.\n"
-            "All imports MUST come verbatim from the production source file listed above.\n"
-            "If a type's package is unknown to you, derive it from the production imports — do NOT invent one.\n"
+            "\n\n### IMPORT PROHIBITION\n"
+            "For project-specific types: derive import paths ONLY from ### IMPORTS PRESENT IN PRODUCTION CLASS.\n"
+            "If a type is not listed there and is not a standard JDK or Mockito/JUnit type, do NOT import it.\n"
         )
 
         file_start_time = time.time()
@@ -1410,8 +1452,8 @@ def generate_tests(repo_path: str, phase: str, rules: str,
             reporter.record_skipped(phase, test_name, reason)
             continue
 
-        # S1: injeta imports ausentes antes de gravar no disco
-        test_code = _auto_inject_missing_imports(test_code, _prod_imports)
+        # S1: injeta imports ausentes antes de gravar no disco (inclui self-import via _s1_imports)
+        test_code = _auto_inject_missing_imports(test_code, _s1_imports)
 
         os.makedirs(os.path.dirname(test_path), exist_ok=True)
         write_file(test_path, test_code)
@@ -1484,8 +1526,23 @@ def generate_tests(repo_path: str, phase: str, rules: str,
                 success = False
                 continue  # não escreve o arquivo — força novo reparo com erro de classe
 
-            # S1: injeta imports ausentes no código corrigido antes de gravar
-            corrected_test = _auto_inject_missing_imports(corrected_test, _prod_imports)
+            # F2: valida package declaration ANTES de escrever no disco
+            # O LLM pode preservar o nome da classe mas trocar o package (com.example.model etc.)
+            if _test_pkg and f"package {_test_pkg};" not in corrected_test:
+                _pkg_found = re.search(r'^package\s+([\w.]+);', corrected_test, re.MULTILINE)
+                _found_pkg = _pkg_found.group(1) if _pkg_found else "UNKNOWN"
+                combined_out = (
+                    f"PACKAGE CRITICAL ERROR: You declared `package {_found_pkg};` "
+                    f"but the file MUST use `package {_test_pkg};`.\n"
+                    f"REPLACE the package declaration to EXACTLY: `package {_test_pkg};`\n"
+                    f"NEVER abbreviate or invent a package — copy `{_test_pkg}` verbatim.\n"
+                    f"Common mistake: writing `com.example.*` or shortened path instead of the full package.\n\n"
+                ) + combined_out[-1000:]
+                success = False
+                continue  # não escreve o arquivo — força novo reparo com erro de package
+
+            # S1: injeta imports ausentes no código corrigido antes de gravar (inclui self-import)
+            corrected_test = _auto_inject_missing_imports(corrected_test, _s1_imports)
             write_file(test_path, corrected_test)
             test_code = corrected_test
             success, combined_out, coverage, missed_lines = maven_test_with_coverage(repo_path, file_name)

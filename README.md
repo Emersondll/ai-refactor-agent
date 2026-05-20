@@ -27,21 +27,22 @@ Agente autônomo de refatoração Java que roda **100% localmente** via Ollama.
 
 ```
 main.py
-  ├── HEALTH_CHECK              → maven_test (valida estado inicial)
-  ├── AUDIT_COVERAGE            → java/refactor.py (gera testes TDD até ≥ 90%)
+  ├── HEALTH_CHECK                 → maven_test (valida estado inicial)
+  ├── AUDIT_COVERAGE               → java/refactor.py (gera testes TDD até ≥ 90%)
   ├── Fases 01–14 (loop sequencial via phases/configs/*.yml)
-  │     ├── tool: community     → java/community_runner.py
-  │     ├── tool: llm           → java/llm_runner.py
-  │     │                            ├── method_level: true  → java/method_runner.py (_run_method_level)
-  │     │                            ├── class_level:  true  → java/method_runner.py (_run_class_level)
-  │     │                            └── (sem flag)          → llm_runner loop por arquivo
-  │     ├── tool: flow          → java/flow_runner.py
-  │     └── tool: flow-dry      → java/flow_runner.py (dry_check)
-  ├── SANITIZATION              → java/sanitizer.py (imports mortos, código inativo)
-  ├── JAVADOC                   → java/javadoc_runner.py (Javadoc em métodos públicos)
-  ├── FINAL_VALIDATION          → maven_test + JaCoCo (cobertura final)
-  ├── REPORT                    → java/report_runner.py (relatório Markdown por classe)
-  └── COMMIT_PUSH               → git_utils/repo.py (branch refactor/ai-agent-automation)
+  │     ├── tool: community        → java/community_runner.py
+  │     ├── tool: llm              → java/llm_runner.py
+  │     │                               ├── method_level: true  → java/method_runner.py (_run_method_level)
+  │     │                               ├── class_level:  true  → java/method_runner.py (_run_class_level)
+  │     │                               └── (sem flag)          → llm_runner loop por arquivo
+  │     ├── tool: flow             → java/flow_runner.py
+  │     └── tool: flow-dry         → java/flow_runner.py (dry_check)
+  ├── AUDIT_COVERAGE_POST_DIP (S5) → java/refactor.py (segunda passagem — classes liberadas pelo solid-dip)
+  ├── SANITIZATION                 → java/sanitizer.py (imports mortos, código inativo)
+  ├── JAVADOC                      → java/javadoc_runner.py (Javadoc em métodos públicos)
+  ├── FINAL_VALIDATION             → maven_test + JaCoCo (cobertura final)
+  ├── REPORT                       → java/report_runner.py (relatório Markdown por classe)
+  └── COMMIT_PUSH                  → git_utils/repo.py (branch refactor/ai-agent-automation)
 ```
 
 ### As 16 Fases
@@ -197,6 +198,7 @@ Todas em `~/.claude/skills/<nome>/SKILL.md`. Carregadas via `load_skill(name, se
 | Fase 12 | `java-controller-lean` | `method_runner._run_method_level()` | detecta lógica de negócio em `@RestController` |
 | Fase 13 | `java-flow-refactor` | `flow_runner.py` | todos os endpoints mapeados pelo `flow_mapper` |
 | Fase 14 | `java-dry-extraction` | `flow_runner.dry_check()` | grupos de arquivos com padrões repetidos |
+| `AUDIT_COVERAGE_POST_DIP` (S5) | `java-tdd-unit-test` | `main.py → generate_tests()` | após fases 01–14 — classes com field injection convertidas pelo solid-dip |
 | Fase 15 | `java-javadoc` | `javadoc_runner.py` | método público sem `/** */` detectado |
 | Repair loop (fases 09–14) | `java-repair-guide` | `java/refactor.py → call_ai_with_correction()` | compilação Maven falha após geração LLM |
 
@@ -252,11 +254,16 @@ python3 -m http.server 8000
 - **Reviewer Pattern**: diff pós-fase avaliado por `llm_reviewer.py` com critérios específicos por skill → APPROVE/REJECT/SKIP
 - **TDD Unit Test Skill**: gera testes autonomamente antes da refatoração preservando comportamento atual; gate de 90% de cobertura
 - **JaCoCo Guardrail**: cobertura mínima ≥ 90%; alerta de regressão se cobertura cair > 1pp após refatoração
-- **Repair Loop (A1)**: falha de compilação → captura erro exato → `call_ai_with_correction()` → até `MAX_RETRIES` tentativas
+- **Repair Loop (A1)**: falha de compilação → captura erro exato → `call_ai_with_correction()` → até `MAX_RETRIES` tentativas com `_categorize_build_error()` identificando o tipo (String→BigDecimal, construtor inválido, símbolo ausente, etc.)
 - **Structural Type Skip**: `_is_structural_type()` detecta records, interfaces, @Entity, @Document, DTOs — zero tokens desperdiçados
 - **Controller Guard (C1)**: `controller-lean` só roda em classes `@RestController`; ServiceImpl pulados automaticamente
 - **Agent Gitignore**: `_ensure_agent_gitignore()` injeta `.refactor_cache/` e `.rag_store/` no `.gitignore` do repo alvo antes de cada commit — evita arquivos internos no histórico
-- **Deferred Field Injection (M7)**: detecta classes com `@Autowired` em campo sem construtor — adia geração de testes até solid-dip converter para constructor injection
+- **Deferred Field Injection (M7)**: detecta classes com `@Autowired` em campo sem construtor — adia geração de testes até solid-dip converter para constructor injection; `_dip_prefiltered` detecta quando solid-dip nunca vai processar e usa `@InjectMocks` imediatamente
+- **Post-DIP Coverage (S5)**: segunda passagem de `generate_tests()` após todas as fases — classes que M7 adiou e que solid-dip converteu agora recebem testes com construtor injetado; classes já cobertas (≥ 90%) puladas por M8 sem custo
+- **Deterministic Import Injection (S1/F1)**: `_auto_inject_missing_imports()` injeta imports ausentes deterministicamente após geração e após cada reparo; usa `_s1_imports = prod_imports + [self_import]` — o self-import (ex: `import com.caju.transactionauthorizer.document.MerchantDocument;`) é derivado do package + nome do arquivo de produção, cobrindo o caso em que a classe testada não se importa a si mesma
+- **Import-Aware Repair (S2/S4)**: `_categorize_build_error()` inclui import exato ao reportar símbolo ausente; C1 vincula import ao `@Mock` correspondente no prompt, reduzindo alucinação de tipo nas gerações de teste
+- **Package Guard (F2)**: após C2 validar o nome da classe no repair loop, nova checagem de package — se o LLM alterou `package` para `com.example.model` (ou qualquer valor que difira de `_test_pkg`), injeta `PACKAGE CRITICAL ERROR` em `combined_out` e força nova tentativa sem gravar o arquivo corrompido no disco
+- **Surgical Assertion Fix (G1/F4)**: `_categorize_build_error()` extrai `expected: <X> but was: <Y>` do output Maven e retorna instrução cirúrgica — "find the assertion containing X and replace with Y, ONE LINE CHANGE only" — evita que o LLM reescreva o teste inteiro ao corrigir um valor errado, o que causava erros de compilação no reparo seguinte; F4 (null vs "") é caso especial do mesmo handler
 
 ---
 
