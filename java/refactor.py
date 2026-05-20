@@ -39,6 +39,15 @@ MAX_TEST_FILE_TIMEOUT_S = 1200  # 20 min máximo por arquivo de teste — escala
 
 _REASON_NO_CHANGE = "no_change"  # sinal: modelo confirmou que não há alterações
 
+# P2: métodos de assertion JUnit 5 — ausência = falta de static import, não método inexistente
+_JUNIT_ASSERTION_METHODS = frozenset({
+    "assertTrue", "assertFalse", "assertEquals", "assertNotEquals",
+    "assertNull", "assertNotNull", "assertThrows", "assertDoesNotThrow",
+    "assertArrayEquals", "assertIterableEquals", "assertLinesMatch",
+    "assertTimeout", "assertTimeoutPreemptively", "fail",
+    "assertSame", "assertNotSame", "assertAll",
+})
+
 # S1/S2: mapa de tipos JDK que LLMs frequentemente usam sem importar
 _JDK_IMPORT_MAP: dict[str, str] = {
     "BigDecimal":    "import java.math.BigDecimal;",
@@ -102,6 +111,13 @@ def _auto_inject_missing_imports(test_code: str, prod_imports: list[str]) -> str
             to_inject.append(prod_map[cls])
         elif cls in _JDK_IMPORT_MAP:
             to_inject.append(_JDK_IMPORT_MAP[cls])
+
+    # P2b: se o teste usa métodos de assertion JUnit sem import static, injeta deterministicamente
+    _STATIC_JUNIT = "import static org.junit.jupiter.api.Assertions.*;"
+    if _STATIC_JUNIT not in test_code:
+        _assertion_pat = r'\b(?:' + '|'.join(_JUNIT_ASSERTION_METHODS) + r')\s*\('
+        if re.search(_assertion_pat, test_code):
+            to_inject.append(_STATIC_JUNIT)
 
     if not to_inject:
         return test_code
@@ -179,6 +195,17 @@ def _categorize_build_error(output: str, prod_imports: list[str] | None = None) 
                         "Replace it with the correct value listed under 'ALLOWED ENUM VALUES'."
                     )
                 if "method" in sym:
+                    # P2a: JUnit assertion method ausente → falta import static, não método inexistente
+                    _method_name_m = re.search(r'\bmethod\s+(\w+)\s*\(', sym)
+                    if _method_name_m and _method_name_m.group(1) in _JUNIT_ASSERTION_METHODS:
+                        return (
+                            "STATIC IMPORT ERROR: JUnit 5 assertion method not found in scope.\n"
+                            "ADD THIS LINE to your import block (copy verbatim):\n"
+                            "  import static org.junit.jupiter.api.Assertions.*;\n"
+                            "This makes assertTrue(), assertFalse(), assertEquals(), assertNull(), etc. available.\n"
+                            "Do NOT call Assertions.assertTrue() explicitly — use the static form directly.\n"
+                            "Do NOT change any other code — ONE import line addition only."
+                        )
                     return (
                         f"METHOD ERROR: You called '{sym}' which DOES NOT EXIST in the class.\n"
                         "Check the exact signatures of the source class and use only real methods."
@@ -464,6 +491,13 @@ _SKIP_FOR_STRUCTURAL = [
 
 _PERMANENT_SKIP_THRESHOLD = 3  # runs consecutivos com falha → skip permanente
 
+# P1: padrões no stack_trace que indicam um bug já corrigido no pipeline.
+# Entradas permanent_skip cujo stack_trace contenha algum destes padrões são
+# automaticamente removidas em reset(), permitindo novo ciclo de geração.
+_AUTO_EXPIRE_STACK_PATTERNS = [
+    "com.example",  # F2 Package Guard: LLM escrevia package errado; corrigido deterministicamente
+]
+
 
 class FailedFilesTracker:
     def __init__(self, logs_dir: str = "logs"):
@@ -551,17 +585,44 @@ class FailedFilesTracker:
         return len(self._entries)
 
     def reset(self) -> None:
-        """Marca entradas atuais como prev_run (acumulam fail_count). Remove permanentes antigas."""
+        """Marca entradas atuais como prev_run. Expira permanentes de bugs já corrigidos."""
         kept = []
         for e in self._entries:
             if e.get("permanent_skip"):
-                kept.append(e)  # permanentes sobrevivem sem alteração
-            elif not e.get("prev_run"):
-                e["prev_run"] = True  # entrada atual vira histórico para o próximo run
+                # P1: se o stack_trace bate com padrão de bug corrigido, remove o bloqueio
+                st = e.get("stack_trace", "")
+                expired_pat = next(
+                    (p for p in _AUTO_EXPIRE_STACK_PATTERNS if p in st), None
+                )
+                if expired_pat:
+                    log(
+                        f"  → {os.path.basename(e['file'])}: permanent_skip expirado "
+                        f"(bug corrigido detectado: '{expired_pat}')",
+                        "INFO",
+                    )
+                    continue  # descarta — arquivo será reprocessado do zero
                 kept.append(e)
-            # entradas já marcadas como prev_run são descartadas (já foram contadas no fail_count)
+            elif not e.get("prev_run"):
+                e["prev_run"] = True
+                kept.append(e)
+            # prev_run já contados são descartados
         self._entries = kept
         self._save()
+
+    def clear_permanent_skips(self, file_path: str | None = None) -> int:
+        """Remove permanent_skip de um arquivo específico (ou de todos). Retorna count."""
+        before = len(self._entries)
+        if file_path:
+            self._entries = [
+                e for e in self._entries
+                if not (e["file"] == file_path and e.get("permanent_skip"))
+            ]
+        else:
+            self._entries = [e for e in self._entries if not e.get("permanent_skip")]
+        removed = before - len(self._entries)
+        if removed:
+            self._save()
+        return removed
 
 
 _failed_tracker: FailedFilesTracker | None = None
