@@ -119,8 +119,13 @@ Para cada arquivo Java:
 ```
 Para cada arquivo Java de produção:
   ├── _all_public_methods_documented? → FILE_SKIPPED (already_documented)
-  ├── call_ai(full_class, regras javadoc)
+  ├── call_ai(full_class, regras javadoc)        ← MODEL_DOC (neural-chat:7b)
   │     └── LLM adiciona /** */ onde falta — sem tocar em corpos de método
+  ├── _strip_comments(new_code) == _strip_comments(original)?
+  │     ├── NÃO → J1: retry com MODEL_STRUCT (qwen2.5-coder:7b) + prompt de crítica
+  │     │         ├── retry aceito?   → continua para compile
+  │     │         └── retry rejeitado → FILE_SKIPPED (code_structure_changed)
+  │     └── SIM → continua para compile
   ├── mvn compile -q
   │     ├── OK  → FILE_ACCEPTED
   │     └── ERR → write_file(original) + FILE_REVERTED
@@ -264,6 +269,9 @@ python3 -m http.server 8000
 - **Import-Aware Repair (S2/S4)**: `_categorize_build_error()` inclui import exato ao reportar símbolo ausente; C1 vincula import ao `@Mock` correspondente no prompt, reduzindo alucinação de tipo nas gerações de teste
 - **Package Guard (F2)**: após C2 validar o nome da classe no repair loop, nova checagem de package — se o LLM alterou `package` para `com.example.model` (ou qualquer valor que difira de `_test_pkg`), injeta `PACKAGE CRITICAL ERROR` em `combined_out` e força nova tentativa sem gravar o arquivo corrompido no disco
 - **Surgical Assertion Fix (G1/F4)**: `_categorize_build_error()` extrai `expected: <X> but was: <Y>` do output Maven e retorna instrução cirúrgica — "find the assertion containing X and replace with Y, ONE LINE CHANGE only" — evita que o LLM reescreva o teste inteiro ao corrigir um valor errado, o que causava erros de compilação no reparo seguinte; F4 (null vs "") é caso especial do mesmo handler
+- **Javadoc Retry (J1)**: quando `neural-chat:7b` (MODEL_DOC) modifica código além de comentários, `javadoc_runner.py` executa retry com `MODEL_STRUCT` (qwen2.5-coder:7b, temp=0.05) antes de rejeitar — reduz de ~11 para ~2–3 falhas `code_structure_changed` por ciclo
+- **Constructor Call Hint (C1)**: `_extract_simplified_header()` em `context.py` gera `// CONSTRUCTOR CALL: new Foo(a, b)` para classes regulares com construtor explícito (não só records) — o LLM usa esse hint ao instanciar objetos nos testes, eliminando chamadas `new Foo()` sem args em `@Document`/`@Entity`
+- **Repair-to-DepContext Bridge (R1)**: `_categorize_build_error()` no RECORD/CONSTRUCTOR ERROR agora instrui explicitamente: "Look in DEPENDENCY CONTEXT for `// CONSTRUCTOR CALL:` and copy that EXACT call" — fecha o loop entre o hint do dep_context (C1) e o reparo do erro (D/R1)
 
 ---
 
