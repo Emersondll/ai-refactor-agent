@@ -137,10 +137,12 @@ def _build_correction_prompt(original_prompt: str, bad_output: str,
 
 def _build_validator_correction_prompt(original_prompt: str, bad_output: str,
                                         validator_error: str,
-                                        original_code: str = "") -> str:
+                                        original_code: str = "",
+                                        expected_class: str = "") -> str:
     """
     Prompt de correção específico para erros do validator Java.
-    Injeta package e class name do código original para evitar hallucination.
+    Injeta package e class name — usa expected_class (nome do arquivo destino) quando disponível,
+    evitando extrair o nome da classe de produção (que seria errado no modo test).
     """
     import re as _re
     mandatory_lines = []
@@ -148,6 +150,11 @@ def _build_validator_correction_prompt(original_prompt: str, bad_output: str,
         pkg_m = _re.search(r'^(package\s+[\w.]+;)', original_code, _re.MULTILINE)
         if pkg_m:
             mandatory_lines.append(f"- Package MUST be exactly: {pkg_m.group(1)}")
+    # B: usa expected_class quando disponível — evita usar o nome da classe de produção
+    # como constraint quando o destino é um arquivo de teste com nome diferente.
+    if expected_class:
+        mandatory_lines.append(f"- Class/record name MUST be exactly: {expected_class}")
+    elif original_code:
         cls_m = _re.search(
             r'(?:public\s+)?(?:class|interface|record|enum)\s+(\w+)',
             original_code
@@ -414,8 +421,11 @@ def call_ai_with_correction(original: str, rules: str, mode: str,
                              dep_context: str = "") -> str | None:
     """Entrada para correção após rejeição do validator."""
     base_prompt = build_prompt(original, rules, mode, file_name, dep_context=dep_context)
+    # B: passa file_name como expected_class para que o mandatory block use o nome do arquivo de
+    # destino (ex: MerchantCategoryCodesServiceImplTest), não o nome da classe de produção.
     correction_prompt = _build_validator_correction_prompt(
-        base_prompt, bad_output, error_reason, original_code=original
+        base_prompt, bad_output, error_reason,
+        original_code=original, expected_class=file_name.replace(".java", ""),
     )
     call_num_predict = 8192 if mode == "test" else 4096
 

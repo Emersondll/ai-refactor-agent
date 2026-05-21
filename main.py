@@ -233,6 +233,23 @@ def main():
     run_sanitization(repo_path)
 
     # --- Javadoc ---
+    # D: descarrega o modelo Ollama em uso antes de JAVADOC para liberar VRAM/RAM saturada
+    # após ~3h de geração de testes — evita timeouts em cascata na fase de Javadoc.
+    try:
+        import urllib.request as _ur, json as _json
+        from config import MODEL_CLEAN as _MODEL_CLEAN, OLLAMA_BASE_URL as _OLLAMA_URL
+        _unload_req = _ur.Request(
+            f"{_OLLAMA_URL}/api/generate",
+            data=_json.dumps({"model": _MODEL_CLEAN, "keep_alive": 0}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with _ur.urlopen(_unload_req, timeout=10):
+            pass
+        log(f"[Javadoc] Modelo {_MODEL_CLEAN} descarregado — VRAM liberada antes de Javadoc", "INFO")
+    except Exception as _unload_err:
+        log(f"[Javadoc] Aviso: falha ao descarregar modelo ({_unload_err}) — continuando", "WARN")
+
     log("Inserindo Javadoc nos métodos públicos...", "PHASE")
     exec_logger.log_phase_start("JAVADOC", "Inserção de Javadoc em métodos públicos")
     try:

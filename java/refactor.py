@@ -335,6 +335,17 @@ def _categorize_build_error(output: str, prod_imports: list[str] | None = None) 
 
     # Tipo incompatível no retorno do mock ou assertion
     if "incompatible types" in out:
+        # E: BigDecimal passado onde Long é esperado (ex: campo version)
+        if "bigdecimal" in out and "long" in out:
+            return (
+                "TYPE MISMATCH — Long field: You passed a BigDecimal where Long is required.\n"
+                "REPLACE the BigDecimal value with a Long literal.\n"
+                "  WRONG:   new BigDecimal(\"1\")  /  new BigDecimal(1)\n"
+                "  CORRECT: 1L  or  Long.valueOf(1)\n"
+                "Check the CONSTRUCTOR CALL hint in DEPENDENCY CONTEXT — "
+                "the parameter typed as 'Long' must receive a long integer, not a decimal.\n"
+                "Apply to ALL Long parameters in constructors and method calls."
+            )
         # A: String literal passado onde BigDecimal é esperado
         if "string" in out and "bigdecimal" in out:
             return (
@@ -748,7 +759,18 @@ def _generate_and_validate(original: str, rules: str, mode: str,
         from java.validator import validate_class_name_matches_file
         is_name_ok, name_error = validate_class_name_matches_file(new_code, file_path)
         if not is_name_ok:
-            reason = f"INTEGRITY ERROR: {name_error}"
+            # B: constrói mensagem de reparo específica com o nome errado E o nome correto
+            _expected_cls = file_name.replace(".java", "")
+            _generated_cls_m = re.search(r'(?:public\s+)?(?:class|interface|record|enum)\s+(\w+)', new_code)
+            _generated_cls = _generated_cls_m.group(1) if _generated_cls_m else "UNKNOWN"
+            reason = (
+                f"CLASS NAME CRITICAL ERROR: You wrote 'class {_generated_cls}' "
+                f"but the EXACT required name is '{_expected_cls}'.\n"
+                f"CHANGE the class declaration to: public class {_expected_cls}\n"
+                "Do NOT abbreviate, shorten, or remove any part of the name — "
+                f"copy EXACTLY '{_expected_cls}' character by character.\n"
+                "This is a hard requirement: the class name MUST equal the filename."
+            )
         else:
             # Melhoria 2: Validação de package
             is_pkg_ok, pkg_error = validate_package_matches_path(new_code, file_path)
@@ -793,7 +815,16 @@ def _generate_and_validate(original: str, rules: str, mode: str,
             from java.validator import validate_class_name_matches_file
             is_name_ok, name_error = validate_class_name_matches_file(corrected, file_path)
             if not is_name_ok:
-                reason = f"INTEGRITY ERROR: {name_error}. The class name must be '{file_name.replace('.java','')}'."
+                _expected_cls2 = file_name.replace(".java", "")
+                _gen_cls_m2 = re.search(r'(?:public\s+)?(?:class|interface|record|enum)\s+(\w+)', corrected)
+                _gen_cls2 = _gen_cls_m2.group(1) if _gen_cls_m2 else "UNKNOWN"
+                reason = (
+                    f"CLASS NAME CRITICAL ERROR: You STILL wrote 'class {_gen_cls2}' "
+                    f"but the EXACT required name is '{_expected_cls2}'.\n"
+                    f"CHANGE the class declaration to: public class {_expected_cls2}\n"
+                    "Do NOT abbreviate under any circumstances — "
+                    f"copy EXACTLY '{_expected_cls2}' every single character."
+                )
             else:
                 is_pkg_ok, pkg_error = validate_package_matches_path(corrected, file_path)
                 if not is_pkg_ok:

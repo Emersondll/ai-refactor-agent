@@ -111,33 +111,50 @@ def _extract_simplified_header(code: str, full_name: str) -> str:
     is_record = bool(re.search(r'\brecord\b', code))
 
     # Pre-extract constructor call hint (records and regular classes)
+    # A: inclui "Tipo nome" (não só nome) para que o LLM saiba o tipo exato de cada parâmetro
+    # e não confunda, ex., Long version com BigDecimal, ou String amount com BigDecimal amount.
     constructor_hint = ""
     if is_record:
-        record_match = re.search(r'\brecord\s+(\w+)\s*\(([^)]+)\)', code, re.DOTALL)
-        if record_match:
-            class_name = record_match.group(1)
-            params_raw = record_match.group(2).replace('\n', ' ')
+        name_match = re.search(r'\brecord\s+(\w+)\s*\(', code)
+        if name_match:
+            class_name = name_match.group(1)
+            # Extrai parâmetros com leitura de parênteses balanceados — @JsonProperty("x") tem ) interno
+            start = name_match.end() - 1  # posição do '(' inicial
+            depth, end = 0, start
+            for i in range(start, len(code)):
+                if code[i] == '(':
+                    depth += 1
+                elif code[i] == ')':
+                    depth -= 1
+                    if depth == 0:
+                        end = i
+                        break
+            params_raw = code[start + 1:end].replace('\n', ' ')
             params = [p.strip() for p in params_raw.split(',') if p.strip()]
-            param_names = []
+            typed_params = []
             for p in params:
-                words = p.split()
-                if words:
-                    last = words[-1].rstrip(')')
-                    if last and last.isidentifier():
-                        param_names.append(last)
-            if param_names:
+                # Remove anotações e seus argumentos para isolar "Tipo nome"
+                clean = re.sub(r'@\w+(?:\([^)]*\))?\s*', '', p).strip()
+                words = clean.split()
+                if len(words) >= 2:
+                    name = words[-1].rstrip(')')
+                    typ  = words[-2].rstrip('>')  # ex.: List<String>
+                    if name and name.isidentifier():
+                        typed_params.append(f"{typ} {name}")
+                elif words:
+                    name = words[-1].rstrip(')')
+                    if name and name.isidentifier():
+                        typed_params.append(name)
+            if typed_params:
                 constructor_hint = (
                     f"    // CONSTRUCTOR CALL: new {class_name}("
-                    + ", ".join(param_names) + ")"
+                    + ", ".join(typed_params) + ")"
                 )
     elif not is_enum:
         # C1: classes regulares com construtor explícito também recebem CONSTRUCTOR CALL hint.
-        # Evita que o LLM invoque new MerchantCategoryCodesDocument() sem argumentos.
-        # Extrai o nome da classe para validar que o ctor_match é realmente um construtor.
         class_name_match = re.search(r'\bclass\s+(\w+)', code)
         if class_name_match:
             _cls = class_name_match.group(1)
-            # Construtor: mesmo nome que a classe, com pelo menos um parâmetro ({3,} = mín. 1 tipo + nome)
             ctor_match = re.search(
                 r'(?:public|protected)\s+' + re.escape(_cls) + r'\s*\(([^)]{3,})\)',
                 code, re.DOTALL
@@ -145,17 +162,23 @@ def _extract_simplified_header(code: str, full_name: str) -> str:
             if ctor_match:
                 params_raw = ctor_match.group(1).replace('\n', ' ')
                 params = [p.strip() for p in params_raw.split(',') if p.strip()]
-                param_names = []
+                typed_params = []
                 for p in params:
-                    words = p.split()
-                    if words:
-                        last = words[-1].rstrip(')')
-                        if last and last.isidentifier():
-                            param_names.append(last)
-                if param_names:
+                    clean = re.sub(r'@\w+(?:\([^)]*\))?\s*', '', p).strip()
+                    words = clean.split()
+                    if len(words) >= 2:
+                        name = words[-1].rstrip(')')
+                        typ  = words[-2].rstrip(')')
+                        if name and name.isidentifier():
+                            typed_params.append(f"{typ} {name}")
+                    elif words:
+                        name = words[-1].rstrip(')')
+                        if name and name.isidentifier():
+                            typed_params.append(name)
+                if typed_params:
                     constructor_hint = (
                         f"    // CONSTRUCTOR CALL: new {_cls}("
-                        + ", ".join(param_names) + ")"
+                        + ", ".join(typed_params) + ")"
                     )
 
     lines = code.splitlines()

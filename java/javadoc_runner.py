@@ -83,11 +83,20 @@ def _process_one_file(file_path: str, rules: str, repo_path: str, exec_logger) -
     if not code:
         return
 
-    # C4: classes de bootstrap/configuração não devem receber Javadoc (mesma regra do method_runner)
+    # C4: classes de bootstrap/configuração não devem receber Javadoc
     if _BOOTSTRAP_RE.search(code):
         log(f"  [javadoc] {file_name} — classe bootstrap/config, pulando")
         if exec_logger:
             exec_logger.log_file_skipped(SKILL_ID, file_name, "bootstrap_class")
+        return
+
+    # C: @Document/@Entity/record/enum são data holders sem lógica de negócio relevante.
+    # Ambos os modelos (J1 primary e retry) modificam código estruturalmente nesses tipos →
+    # pular evita code_structure_changed cascata e tempo desperdiçado.
+    if re.search(r'@(Document|Entity|Table)\b', code) or re.search(r'\b(record|enum)\b', code):
+        log(f"  [javadoc] {file_name} — data holder (@Document/record/enum), pulando")
+        if exec_logger:
+            exec_logger.log_file_skipped(SKILL_ID, file_name, "data_holder")
         return
 
     if _all_public_methods_documented(code):
