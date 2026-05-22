@@ -520,7 +520,9 @@ _PERMANENT_SKIP_THRESHOLD = 3  # runs consecutivos com falha → skip permanente
 # Entradas permanent_skip cujo stack_trace contenha algum destes padrões são
 # automaticamente removidas em reset(), permitindo novo ciclo de geração.
 _AUTO_EXPIRE_STACK_PATTERNS = [
-    "com.example",  # F2 Package Guard: LLM escrevia package errado; corrigido deterministicamente
+    "com.example",              # F2 Package Guard: package hallucination no longer possible
+    "actual and formal argument lists differ in length",  # Fix A: CONSTRUCTOR CALL hint now includes types
+    "O arquivo se chama",       # Fix B/H: old Portuguese integrity error — impossible after fix B
 ]
 
 
@@ -615,7 +617,7 @@ class FailedFilesTracker:
         for e in self._entries:
             if e.get("permanent_skip"):
                 # P1: se o stack_trace bate com padrão de bug corrigido, remove o bloqueio
-                st = e.get("stack_trace", "")
+                st = (e.get("stack_trace") or "") + " " + (e.get("reason") or "")
                 expired_pat = next(
                     (p for p in _AUTO_EXPIRE_STACK_PATTERNS if p in st), None
                 )
