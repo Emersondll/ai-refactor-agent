@@ -48,15 +48,16 @@ _NOT_CLASS_RE = re.compile(
 )
 
 # Getter: public T getX() { return field; }  ou  public boolean isX() { return field; }
-# Tolerante a espaço/newline dentro do corpo
+# Body MUST be exactly: return <one_identifier>;  — no ternary, operators, or calls.
 _GETTER_RE = re.compile(
-    r'public\s+\S+\s+(?:get|is)(\w+)\s*\(\s*\)\s*\{[^}]*\}',
+    r'public\s+\S+\s+(?:get|is)(\w+)\s*\(\s*\)\s*\{\s*return\s+\w+\s*;\s*\}',
     re.MULTILINE | re.DOTALL,
 )
 
 # Setter: public void setX(T v) { this.field = v; }
+# Body MUST be exactly: this.<field> = <param>;  — both sides bare identifiers.
 _SETTER_RE = re.compile(
-    r'public\s+void\s+set(\w+)\s*\(\s*\S+\s+\w+\s*\)\s*\{[^}]*\}',
+    r'public\s+void\s+set(\w+)\s*\(\s*\S+\s+\w+\s*\)\s*\{\s*this\.\w+\s*=\s*\w+\s*;\s*\}',
     re.MULTILINE | re.DOTALL,
 )
 

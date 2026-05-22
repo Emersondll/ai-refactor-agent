@@ -76,3 +76,33 @@ public class Tx {
     assert 'Timestamp.valueOf("2023-01-15 10:00:00")' in out
     assert "import java.sql.Timestamp;" in out
     assert "T10:00:00" not in out
+
+def test_getter_with_ternary_logic_is_not_pure():
+    code = '''package x;
+public class Holder {
+    private String id;
+    public Holder(String id) { this.id = id; }
+    public String getId() { return id != null ? id : ""; }
+    public void setId(String id) { this.id = id; }
+}'''
+    assert is_pure_data_holder(code) is False
+
+def test_getter_with_method_call_is_not_pure():
+    code = '''package x;
+public class Holder {
+    private String id;
+    public Holder(String id) { this.id = id; }
+    public String getId() { return id.toUpperCase(); }
+    public void setId(String id) { this.id = id; }
+}'''
+    assert is_pure_data_holder(code) is False
+
+def test_setter_with_validation_logic_is_not_pure():
+    code = '''package x;
+public class Holder {
+    private String id;
+    public Holder(String id) { this.id = id; }
+    public String getId() { return id; }
+    public void setId(String id) { this.id = id.trim(); }
+}'''
+    assert is_pure_data_holder(code) is False
