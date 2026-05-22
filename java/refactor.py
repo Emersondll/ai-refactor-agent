@@ -60,6 +60,8 @@ _JDK_IMPORT_MAP: dict[str, str] = {
     "Instant":       "import java.time.Instant;",
     "Duration":      "import java.time.Duration;",
     "Period":        "import java.time.Period;",
+    "Timestamp":     "import java.sql.Timestamp;",
+    "Date":          "import java.util.Date;",
     "UUID":          "import java.util.UUID;",
     "ArrayList":     "import java.util.ArrayList;",
     "LinkedList":    "import java.util.LinkedList;",
@@ -139,6 +141,18 @@ def _auto_inject_missing_imports(test_code: str, prod_imports: list[str]) -> str
 def _categorize_build_error(output: str, prod_imports: list[str] | None = None) -> str:
     """Analisa o erro Maven e retorna instrução de reparo direcionada."""
     out = output.lower()
+
+    # F: IllegalArgumentException com mensagem de formato Timestamp (java.sql.Timestamp.valueOf)
+    if "illegalargument" in out and "timestamp format" in out:
+        return (
+            "TIMESTAMP FORMAT ERROR: java.sql.Timestamp.valueOf() received an invalid format string.\n"
+            "The format MUST be exactly: \"yyyy-mm-dd hh:mm:ss\" (space between date and time, NOT 'T').\n\n"
+            "FIND in your @BeforeEach or test body every occurrence of:\n"
+            "  Timestamp.valueOf(\"...T...\")   ← WRONG — 'T' is ISO-8601, not SQL format\n"
+            "REPLACE with:\n"
+            "  Timestamp.valueOf(\"2023-01-15 10:00:00\")   ← CORRECT — space, not T\n\n"
+            "ONE CHANGE ONLY — do NOT modify any other code. Do NOT change assertions, imports, or class structure.\n"
+        )
 
     # Erro de construtor de record (detectar ANTES de cannot find symbol)
     if "constructor" in out and "in record" in out and "cannot be applied" in out:
@@ -1496,6 +1510,20 @@ def generate_tests(repo_path: str, phase: str, rules: str,
                 "  CORRECT: new BigDecimal(\"100.00\")  or  BigDecimal.valueOf(100)\n"
                 "  WRONG:   \"100.00\"  ← String literal, incompatible type, will NOT compile\n"
                 "Apply this to constructors, setters, method calls, and mock return values.\n"
+            )
+
+        # F: regra preventiva — quando a classe usa java.sql.Timestamp
+        # Timestamp.valueOf() exige formato SQL "yyyy-mm-dd hh:mm:ss" (espaço, não T ISO).
+        if re.search(r'\bTimestamp\b', original) and 'import java.sql.Timestamp' in original:
+            active_rules += (
+                "\n\n### JAVA SQL TIMESTAMP CONSTRUCTION (MANDATORY — VIOLATION CAUSES RUNTIME FAILURE)\n"
+                "This class uses java.sql.Timestamp. For ALL test values involving Timestamp:\n"
+                "  CORRECT: Timestamp.valueOf(\"2023-01-15 10:00:00\")  ← space between date and time\n"
+                "  WRONG:   Timestamp.valueOf(\"2023-01-15T10:00:00\")  ← T is ISO format, NOT SQL format\n"
+                "  WRONG:   new Timestamp(longValue)  ← use valueOf() with string for readability\n"
+                "The format MUST be exactly: \"yyyy-mm-dd hh:mm:ss\" or \"yyyy-mm-dd hh:mm:ss.nnnnnnnnn\"\n"
+                "NEVER use ISO-8601 format (with 'T') — it throws IllegalArgumentException at runtime.\n"
+                "ALWAYS add: import java.sql.Timestamp;\n"
             )
 
         # C1: injetar campos @Autowired quando classe usa field injection (S5 path)
