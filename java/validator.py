@@ -233,6 +233,6 @@ def validate_class_name_matches_file(code: str, file_path: str) -> tuple[bool, s
     any_class = re.search(r'(?:public\s+)?(class|interface|enum|record)\s+(\w+)', code)
     if any_class:
         found_name = any_class.group(2)
-        return False, f"O arquivo se chama '{file_name}.java' mas você gerou a classe '{found_name}'."
-    
-    return False, f"Não foi encontrada a classe '{file_name}' no código gerado."
+        return False, f"File is named '{file_name}.java' but generated class is '{found_name}'."
+
+    return False, f"Class '{file_name}' not found in the generated code."
