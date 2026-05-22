@@ -164,3 +164,11 @@ def commit_and_push(repo_path: str, branch_name: str, phase: str) -> bool:
 
     log(f"Push falhou definitivamente: {force_err.strip()[:200]}", "ERR")
     return False
+
+
+def commit_single_file(repo_path: str, file_abs_path: str, message: str) -> bool:
+    """Commit a single file locally (no push). Crash-safety for long test runs."""
+    rel = os.path.relpath(file_abs_path, repo_path)
+    run_cmd(f'git add "{rel}"', cwd=repo_path)
+    code, _, _ = run_cmd(f'git commit -m "{message}" -- "{rel}"', cwd=repo_path)
+    return code == 0

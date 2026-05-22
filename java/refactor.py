@@ -1456,6 +1456,9 @@ def generate_tests(repo_path: str, phase: str, rules: str,
                             exec_logger.log_file_accepted(phase, test_name, "+test")
                             exec_logger.log_model_used(phase, test_name, "deterministic", "ACCEPTED")
                         any_changed = True
+                        from git_utils.repo import commit_single_file
+                        commit_single_file(repo_path, test_path,
+                                            f"test: add {test_name} (deterministic)")
                         continue
                     log(f"  {test_name}: gerador determinístico falhou no build — fallback para LLM", "WARN")
                     os.remove(test_path)
@@ -1788,6 +1791,8 @@ def generate_tests(repo_path: str, phase: str, rules: str,
             exec_logger.log_model_used(phase, test_name, _get_model(), "ACCEPTED")
         log(f"  {test_name} {action_label} ✓", "OK")
         any_changed = True
+        from git_utils.repo import commit_single_file
+        commit_single_file(repo_path, test_path, f"test: add {test_name}")
 
     return any_changed
 def _attempt_global_sync(build_output: str, repo_path: str, rules: str, phase: str, trigger_file_content: str):
