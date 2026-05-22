@@ -289,6 +289,26 @@ def _categorize_build_error(output: str, prod_imports: list[str] | None = None) 
                             "  ONE change only."
                         )
 
+                    # S4: test expects null (assertNull) but actual is a real non-null value
+                    # Mirror of S1: setUp/constructor already initialized the field.
+                    # G1 general is ambiguous here because "null" is in the method name assertNull().
+                    if _expected_in_test == "null" and _actual_from_code and _actual_from_code != "null":
+                        return (
+                            f"ASSERTION WRONG EXPECTED VALUE:\n"
+                            f"  Your test used assertNull() but the actual return value is:"
+                            f" <{_actual_from_code}>\n\n"
+                            f"ROOT CAUSE: setUp() or the constructor already initialized this field"
+                            f" to '{_actual_from_code}'.\n"
+                            "  assertNull() fails because the field is NOT null"
+                            " — it was set by the constructor.\n\n"
+                            "SURGICAL FIX — change ONLY the failing assertNull line:\n"
+                            f"  REPLACE: assertNull(expression)\n"
+                            f"  WITH:    assertEquals(\"{_actual_from_code}\", expression)\n"
+                            "  Do NOT modify setUp(), constructor calls, other assertions,"
+                            " imports, or any other code.\n"
+                            "  ONE LINE CHANGE — nothing else."
+                        )
+
                     # S1: actual é null — instrução específica para assertNull()
                     # Evita ambiguidade: LLM não deve usar assertEquals("null", ...) nem assertEquals(null, ...)
                     if _actual_from_code == "null":
@@ -1420,6 +1440,26 @@ def generate_tests(repo_path: str, phase: str, rules: str,
         except Exception:
             pass
 
+        # P0: data holders são testados deterministicamente — sem LLM, sem repair loop.
+        if not complement_mode:
+            from java.data_holder_test_gen import is_pure_data_holder, generate_data_holder_test
+            if is_pure_data_holder(original):
+                _dh_test = generate_data_holder_test(original, test_name.replace(".java", ""), _test_pkg)
+                if _dh_test:
+                    os.makedirs(os.path.dirname(test_path), exist_ok=True)
+                    write_file(test_path, _dh_test)
+                    _dh_ok, _dh_out, _dh_cov, _ = maven_test_with_coverage(repo_path, file_name)
+                    if _dh_ok:
+                        log(f"  {test_name} CRIADO (determinístico, sem LLM) ✓", "OK")
+                        reporter.record_changed(phase, test_name, test_path, "", _dh_test)
+                        if exec_logger:
+                            exec_logger.log_file_accepted(phase, test_name, "+test")
+                            exec_logger.log_model_used(phase, test_name, "deterministic", "ACCEPTED")
+                        any_changed = True
+                        continue
+                    log(f"  {test_name}: gerador determinístico falhou no build — fallback para LLM", "WARN")
+                    os.remove(test_path)
+
         _mandatory_prefix = (
             f"### TEST CLASS — MANDATORY NAME AND PACKAGE (HIGHEST PRIORITY — APPLY BEFORE ANYTHING ELSE)\n"
             f"- The test class declaration MUST be EXACTLY: `public class {_test_cls_name} {{`\n"
@@ -1512,6 +1552,22 @@ def generate_tests(repo_path: str, phase: str, rules: str,
                 "  CORRECT: new BigDecimal(\"100.00\")  or  BigDecimal.valueOf(100)\n"
                 "  WRONG:   \"100.00\"  ← String literal, incompatible type, will NOT compile\n"
                 "Apply this to constructors, setters, method calls, and mock return values.\n"
+            )
+
+        # S4 preventive: classe com construtor com parâmetros → setUp inicializa campos não-nulos
+        # Evita que o LLM use assertNull() para campos que o construtor já preencheu no setUp.
+        if re.search(r'public\s+\w+\s*\([^)]{3,}\)', original):
+            active_rules += (
+                "\n\n### SETTER/GETTER TEST PATTERN (MANDATORY)\n"
+                "This class has a constructor with parameters. setUp() initializes the object"
+                " with NON-NULL values via this constructor.\n"
+                "When testing setX()/getX() pairs:\n"
+                "  CORRECT: call setX(newValue), then assertEquals(newValue, object.getX())\n"
+                "  WRONG:   assertNull(object.getX()) before calling setX()"
+                " — setUp already set a non-null value\n"
+                "Do NOT use assertNull() for any field that the constructor populates.\n"
+                "If you need to test the initial state, use assertEquals with the value"
+                " passed to the constructor in setUp().\n"
             )
 
         # F: regra preventiva — quando a classe usa java.sql.Timestamp
