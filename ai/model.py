@@ -13,7 +13,7 @@ import time
 import anthropic
 
 from config import (
-    TIMEOUT, TIMEOUT_TEST, MAX_RETRIES,
+    TIMEOUT, TIMEOUT_TEST, MAX_RETRIES, OLLAMA_SEED,
     MODEL_DOC, MODEL_STRUCT, MODEL_CLEAN, MODEL_SOLID, MODEL_RECOVERY,
     CLAUDE_MODEL, CLAUDE_API_KEY, USE_CLAUDE_FALLBACK,
 )
@@ -91,7 +91,8 @@ def call_model(model: str, prompt: str, temperature: float = 0.7,
         "options": {
             "temperature": temperature,
             "num_predict": num_predict,
-            "top_p": 0.9
+            "top_p": 0.9,
+            "seed": OLLAMA_SEED,
         }
     }
     _timeout = timeout if timeout is not None else TIMEOUT

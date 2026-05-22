@@ -26,6 +26,7 @@ FLOW_MODE           = os.getenv("FLOW_MODE", "false").lower() == "true"
 TIMEOUT      = 600   # refatoração — tempo máximo por chamada Ollama
 TIMEOUT_TEST = 420   # geração de testes — 7 min por chamada; cobre ~50s KV cache + ~250s geração (gemma4 9B) com margem
 MAX_RETRIES  = 2
+OLLAMA_SEED  = int(os.getenv("OLLAMA_SEED", "42"))  # fixed seed → reproducible generation run-to-run
 
 # ---------------------------------------------------------------------------
 # Performance Skills (all disabled by default — enable via .env)
