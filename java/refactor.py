@@ -1314,6 +1314,144 @@ def _extract_test_setup(existing_test: str) -> str:
 # Geração de testes
 # ---------------------------------------------------------------------------
 
+def _build_active_rules(
+    original: str,
+    _prod_imports: list[str],
+    _self_import: str | None,
+    _test_cls_name: str,
+    _test_pkg: str,
+    complement_mode: bool,
+    rules: str,
+) -> str:
+    """Build the active_rules string for LLM-based test generation.
+
+    Centralises all conditional rule blocks so they can be unit-tested independently.
+    complement_mode path is NOT handled here — caller builds that branch directly.
+    Returns the assembled rules string (non-complement path only).
+    """
+    _mandatory_prefix = (
+        f"### TEST CLASS — MANDATORY NAME AND PACKAGE (HIGHEST PRIORITY — APPLY BEFORE ANYTHING ELSE)\n"
+        f"- The test class declaration MUST be EXACTLY: `public class {_test_cls_name} {{`\n"
+        f"- NEVER rename, shorten, or alter this class name in any way.\n"
+    )
+    if _test_pkg:
+        _mandatory_prefix += (
+            f"- The package declaration MUST be EXACTLY: `package {_test_pkg};`\n"
+            f"- NEVER abbreviate `{_test_pkg}` — copy the FULL package path verbatim.\n"
+            f"  (Common mistake: writing `{'.'.join(_test_pkg.split('.')[:3])}.*` instead of the full path)\n"
+            f"- NEVER use com.example.*, com.test.*, com.demo.*, or any invented package.\n"
+        )
+    _mandatory_prefix += "\n\n"
+
+    active_rules = _mandatory_prefix + rules
+
+    # State mandatory-ness once globally — individual block titles omit the suffix.
+    active_rules += (
+        "\n\n### ALL `###` BLOCKS BELOW ARE MANDATORY — VIOLATION CAUSES BUILD OR RUNTIME FAILURE\n"
+    )
+
+    # C21: record semantics — only when class is a Java record
+    if re.search(r'\brecord\s+\w+', original):
+        active_rules += (
+            "\n\n### JAVA RECORD SEMANTICS (the class under test is a Java record)\n"
+            "Records auto-generate equals/hashCode based on all component fields, "
+            "toString() returning 'ClassName[field=val]', "
+            "and a canonical constructor requiring all declared fields — no default no-arg constructor exists.\n"
+            "NEVER assert toString() returns only the raw value; NEVER call new RecordName() without all required arguments.\n"
+            "Two records with the same field values are equal via assertEquals without extra setup.\n"
+        )
+
+    # Merged IMPORTS block: IMPORTS PRESENT + SELF-IMPORT + IMPORT PROHIBITION (blocks 5, 6, 12)
+    if _prod_imports:
+        _imports_block = (
+            "\n\n### IMPORTS\n"
+            "Use ONLY these import paths — do NOT hallucinate any other path for project types:\n"
+            + "\n".join(_prod_imports) + "\n"
+        )
+        if _self_import:
+            _imports_block += (
+                f"SELF-IMPORT (always include this line in the test file):\n"
+                f"  {_self_import}\n"
+            )
+        _imports_block += (
+            "For project-specific types: derive paths ONLY from the list above.\n"
+            "If a type is not listed and is not a standard JDK/Mockito/JUnit type, do NOT import it.\n"
+        )
+        active_rules += _imports_block
+
+    # C: BigDecimal construction — prevents compile failure
+    if re.search(r'\bBigDecimal\b', original):
+        active_rules += (
+            "\n\n### BIGDECIMAL CONSTRUCTION\n"
+            "CORRECT: new BigDecimal(\"100.00\")  or  BigDecimal.valueOf(100)\n"
+            "WRONG:   \"100.00\"  — String literal, incompatible type, will NOT compile.\n"
+            "Apply to constructors, setters, method calls, and mock return values.\n"
+        )
+
+    # S4: setter/getter pattern — class has parameterized constructor
+    if re.search(r'public\s+\w+\s*\([^)]{3,}\)', original):
+        active_rules += (
+            "\n\n### SETTER/GETTER TEST PATTERN\n"
+            "setUp() initializes the object with NON-NULL values via the parameterized constructor.\n"
+            "CORRECT: call setX(newValue), then assertEquals(newValue, object.getX())\n"
+            "WRONG:   assertNull(object.getX()) before calling setX() — setUp already set a non-null value.\n"
+        )
+
+    # F: java.sql.Timestamp construction — prevents runtime failure
+    if re.search(r'\bTimestamp\b', original) and 'import java.sql.Timestamp' in original:
+        active_rules += (
+            "\n\n### JAVA SQL TIMESTAMP CONSTRUCTION\n"
+            "CORRECT: Timestamp.valueOf(\"2023-01-15 10:00:00\")  — space between date and time.\n"
+            "WRONG:   Timestamp.valueOf(\"2023-01-15T10:00:00\")  — T is ISO format, NOT SQL format.\n"
+            "Format MUST be \"yyyy-mm-dd hh:mm:ss\"; NEVER ISO-8601 (with 'T') — throws IllegalArgumentException.\n"
+        )
+
+    # C1: field injection via @Autowired — mock setup
+    _autowired_fields = re.findall(
+        r'@Autowired\s+(?:private\s+)?(\w[\w<>, ]*?\s+\w+)\s*;',
+        original,
+    )
+    if _autowired_fields:
+        _prod_import_map: dict[str, str] = {}
+        for _imp in _prod_imports:
+            _m = re.match(r'import\s+([\w.]+);', _imp)
+            if _m:
+                _prod_import_map[_m.group(1).split(".")[-1]] = _imp
+        _mock_lines: list[str] = []
+        for _field in _autowired_fields:
+            _type_name = _field.split()[0]
+            _mock_lines.append(f"  @Mock  {_field};")
+            if "<" not in _type_name:
+                _resolved = _prod_import_map.get(_type_name) or _JDK_IMPORT_MAP.get(_type_name)
+                if _resolved:
+                    _mock_lines.append(f"  // Required import: {_resolved}")
+        active_rules += (
+            "\n\n### FIELD INJECTION — MOCK SETUP\n"
+            "Use @ExtendWith(MockitoExtension.class) + @InjectMocks for the class under test.\n"
+            "Declare one @Mock per injected dependency:\n"
+            + "\n".join(_mock_lines) + "\n"
+            "@InjectMocks handles injection automatically — do NOT write a constructor or @BeforeEach that manually injects.\n"
+        )
+
+    # M2: @Document import for MongoDB
+    if re.search(r'@Document\b', original):
+        active_rules += (
+            "\n\n### MONGODB @Document IMPORT\n"
+            "MUST add to test file: import org.springframework.data.mongodb.core.mapping.Document;\n"
+            "Do NOT omit it — the class will not compile without it.\n"
+        )
+
+    # S3: null assertions — prevents enum-vs-null failures
+    active_rules += (
+        "\n\n### NULL ASSERTIONS\n"
+        "When input for a field is null, the method may return null — use assertNull(result.getField()).\n"
+        "NEVER assertEquals(EnumValue, result.getField()) when input was null.\n"
+        "NEVER invent a non-null expected value unless the production code explicitly defines a non-null default.\n"
+    )
+
+    return active_rules
+
+
 def generate_tests(repo_path: str, phase: str, rules: str,
                    reporter: PhaseReporter,
                    exec_logger: ExecutionLogger | None = None) -> bool:
@@ -1463,22 +1601,36 @@ def generate_tests(repo_path: str, phase: str, rules: str,
                     log(f"  {test_name}: gerador determinístico falhou no build — fallback para LLM", "WARN")
                     os.remove(test_path)
 
-        _mandatory_prefix = (
-            f"### TEST CLASS — MANDATORY NAME AND PACKAGE (HIGHEST PRIORITY — APPLY BEFORE ANYTHING ELSE)\n"
-            f"- The test class declaration MUST be EXACTLY: `public class {_test_cls_name} {{`\n"
-            f"- NEVER rename, shorten, or alter this class name in any way.\n"
+        _prod_imports = re.findall(r'^import\s+[\w.]+;', original, re.MULTILINE)
+
+        # F1: self-import — a classe sob teste não importa a si mesma, mas o teste precisa importá-la.
+        # Derivamos o import exato do package da classe de produção + nome do arquivo.
+        _prod_pkg_m = re.search(r'^package\s+([\w.]+);', original, re.MULTILINE)
+        _prod_cls_name = file_name.replace(".java", "")
+        _self_import: str | None = (
+            f"import {_prod_pkg_m.group(1)}.{_prod_cls_name};" if _prod_pkg_m else None
         )
-        if _test_pkg:
-            _mandatory_prefix += (
-                f"- The package declaration MUST be EXACTLY: `package {_test_pkg};`\n"
-                f"- NEVER abbreviate `{_test_pkg}` — copy the FULL package path verbatim.\n"
-                f"  (Common mistake: writing `{'.'.join(_test_pkg.split('.')[:3])}.*` instead of the full path)\n"
-                f"- NEVER use com.example.*, com.test.*, com.demo.*, or any invented package.\n"
-            )
-        _mandatory_prefix += "\n\n"
+        # Lista ampliada para S1: prod_imports + self-import (garante que MerchantDocument,
+        # TransactionController etc. sejam sempre injetados mesmo após reparos do LLM)
+        _s1_imports = list(_prod_imports)
+        if _self_import:
+            _s1_imports.append(_self_import)
 
         # M8: regras de complementação — LLM recebe teste existente + setup explícito + lacunas
         if complement_mode:
+            _mandatory_prefix = (
+                f"### TEST CLASS — MANDATORY NAME AND PACKAGE (HIGHEST PRIORITY — APPLY BEFORE ANYTHING ELSE)\n"
+                f"- The test class declaration MUST be EXACTLY: `public class {_test_cls_name} {{`\n"
+                f"- NEVER rename, shorten, or alter this class name in any way.\n"
+            )
+            if _test_pkg:
+                _mandatory_prefix += (
+                    f"- The package declaration MUST be EXACTLY: `package {_test_pkg};`\n"
+                    f"- NEVER abbreviate `{_test_pkg}` — copy the FULL package path verbatim.\n"
+                    f"  (Common mistake: writing `{'.'.join(_test_pkg.split('.')[:3])}.*` instead of the full path)\n"
+                    f"- NEVER use com.example.*, com.test.*, com.demo.*, or any invented package.\n"
+                )
+            _mandatory_prefix += "\n\n"
             setup_block = _extract_test_setup(existing_test_code)
             active_rules = (
                 f"{_mandatory_prefix}{rules}\n\n"
@@ -1505,148 +1657,16 @@ def generate_tests(repo_path: str, phase: str, rules: str,
                 "Return the COMPLETE test file: all existing content unchanged + new @Test methods at the end."
             )
         else:
-            active_rules = _mandatory_prefix + rules
-
-        # C21: injetar semântica de record quando a classe-alvo é um record Java
-        if re.search(r'\brecord\s+\w+', original):
-            active_rules += (
-                "\n\n### JAVA RECORD SEMANTICS (the class under test is a Java record)\n"
-                "Records auto-generate:\n"
-                "- equals/hashCode based on all component fields\n"
-                "- toString() returning 'ClassName[field1=val1, field2=val2]' — NEVER just the raw field value\n"
-                "- A canonical constructor requiring all declared fields — no default no-arg constructor exists\n"
-                "MANDATORY rules:\n"
-                "- NEVER assert toString() returns only the raw value (e.g. 'ABC') — always includes class name prefix\n"
-                "- NEVER call new RecordName() without all required field arguments\n"
-                "- Two records with the same field values are equal via assertEquals without extra setup\n"
+            # Non-complement path: use consolidated helper
+            active_rules = _build_active_rules(
+                original       = original,
+                _prod_imports  = _prod_imports,
+                _self_import   = _self_import,
+                _test_cls_name = _test_cls_name,
+                _test_pkg      = _test_pkg,
+                complement_mode = False,
+                rules          = rules,
             )
-
-        _prod_imports = re.findall(r'^import\s+[\w.]+;', original, re.MULTILINE)
-
-        # F1: self-import — a classe sob teste não importa a si mesma, mas o teste precisa importá-la.
-        # Derivamos o import exato do package da classe de produção + nome do arquivo.
-        _prod_pkg_m = re.search(r'^package\s+([\w.]+);', original, re.MULTILINE)
-        _prod_cls_name = file_name.replace(".java", "")
-        _self_import: str | None = (
-            f"import {_prod_pkg_m.group(1)}.{_prod_cls_name};" if _prod_pkg_m else None
-        )
-        # Lista ampliada para S1: prod_imports + self-import (garante que MerchantDocument,
-        # TransactionController etc. sejam sempre injetados mesmo após reparos do LLM)
-        _s1_imports = list(_prod_imports)
-        if _self_import:
-            _s1_imports.append(_self_import)
-
-        if _prod_imports:
-            active_rules += (
-                "\n\n### IMPORTS PRESENT IN PRODUCTION CLASS (use as reference — do not hallucinate others)\n"
-                + "\n".join(_prod_imports) + "\n"
-            )
-        if _self_import:
-            active_rules += (
-                f"\n### SELF-IMPORT (MANDATORY — always include this line in the test file)\n"
-                f"  {_self_import}\n"
-            )
-
-        # C: regra preventiva — quando a classe de produção declara campos BigDecimal
-        if re.search(r'\bBigDecimal\b', original):
-            active_rules += (
-                "\n\n### BIGDECIMAL CONSTRUCTION (MANDATORY — VIOLATION CAUSES COMPILE FAILURE)\n"
-                "This class uses BigDecimal. For ALL test values involving BigDecimal:\n"
-                "  CORRECT: new BigDecimal(\"100.00\")  or  BigDecimal.valueOf(100)\n"
-                "  WRONG:   \"100.00\"  ← String literal, incompatible type, will NOT compile\n"
-                "Apply this to constructors, setters, method calls, and mock return values.\n"
-            )
-
-        # S4 preventive: classe com construtor com parâmetros → setUp inicializa campos não-nulos
-        # Evita que o LLM use assertNull() para campos que o construtor já preencheu no setUp.
-        if re.search(r'public\s+\w+\s*\([^)]{3,}\)', original):
-            active_rules += (
-                "\n\n### SETTER/GETTER TEST PATTERN (MANDATORY)\n"
-                "This class has a constructor with parameters. setUp() initializes the object"
-                " with NON-NULL values via this constructor.\n"
-                "When testing setX()/getX() pairs:\n"
-                "  CORRECT: call setX(newValue), then assertEquals(newValue, object.getX())\n"
-                "  WRONG:   assertNull(object.getX()) before calling setX()"
-                " — setUp already set a non-null value\n"
-                "Do NOT use assertNull() for any field that the constructor populates.\n"
-                "If you need to test the initial state, use assertEquals with the value"
-                " passed to the constructor in setUp().\n"
-            )
-
-        # F: regra preventiva — quando a classe usa java.sql.Timestamp
-        # Timestamp.valueOf() exige formato SQL "yyyy-mm-dd hh:mm:ss" (espaço, não T ISO).
-        if re.search(r'\bTimestamp\b', original) and 'import java.sql.Timestamp' in original:
-            active_rules += (
-                "\n\n### JAVA SQL TIMESTAMP CONSTRUCTION (MANDATORY — VIOLATION CAUSES RUNTIME FAILURE)\n"
-                "This class uses java.sql.Timestamp. For ALL test values involving Timestamp:\n"
-                "  CORRECT: Timestamp.valueOf(\"2023-01-15 10:00:00\")  ← space between date and time\n"
-                "  WRONG:   Timestamp.valueOf(\"2023-01-15T10:00:00\")  ← T is ISO format, NOT SQL format\n"
-                "  WRONG:   new Timestamp(longValue)  ← use valueOf() with string for readability\n"
-                "The format MUST be exactly: \"yyyy-mm-dd hh:mm:ss\" or \"yyyy-mm-dd hh:mm:ss.nnnnnnnnn\"\n"
-                "NEVER use ISO-8601 format (with 'T') — it throws IllegalArgumentException at runtime.\n"
-                "ALWAYS add: import java.sql.Timestamp;\n"
-            )
-
-        # C1: injetar campos @Autowired quando classe usa field injection (S5 path)
-        _autowired_fields = re.findall(
-            r'@Autowired\s+(?:private\s+)?(\w[\w<>, ]*?\s+\w+)\s*;',
-            original,
-        )
-        if _autowired_fields:
-            # S4: resolve import exato para cada @Mock — só para tipos simples (sem generics)
-            _prod_import_map: dict[str, str] = {}
-            for _imp in _prod_imports:
-                _m = re.match(r'import\s+([\w.]+);', _imp)
-                if _m:
-                    _prod_import_map[_m.group(1).split(".")[-1]] = _imp
-
-            _mock_lines: list[str] = []
-            for _field in _autowired_fields:
-                _type_name = _field.split()[0]
-                _mock_lines.append(f"  @Mock  {_field};")
-                if "<" not in _type_name:
-                    _resolved = _prod_import_map.get(_type_name) or _JDK_IMPORT_MAP.get(_type_name)
-                    if _resolved:
-                        _mock_lines.append(f"  // Required import: {_resolved}")
-
-            active_rules += (
-                "\n\n### FIELD INJECTION — MOCK SETUP (MANDATORY)\n"
-                "The class under test uses @Autowired field injection (no constructor).\n"
-                "Use @ExtendWith(MockitoExtension.class) + @InjectMocks for the class under test.\n"
-                "Declare one @Mock per injected dependency listed below "
-                "(each line shows the @Mock and its required import):\n"
-                + "\n".join(_mock_lines) + "\n"
-                "Do NOT write a constructor or @BeforeEach that manually injects these — "
-                "Mockito does it automatically via @InjectMocks.\n"
-            )
-
-        # M2: classe com @Document precisa do import MongoDB explícito no teste
-        if re.search(r'@Document\b', original):
-            active_rules += (
-                "\n\n### MONGODB @Document IMPORT (MANDATORY)\n"
-                "The class under test uses @Document from Spring Data MongoDB.\n"
-                "You MUST add this import to the test file:\n"
-                "  import org.springframework.data.mongodb.core.mapping.Document;\n"
-                "Do NOT omit it — the class will not compile without it.\n"
-            )
-
-        # P3: IMPORT PROHIBITION simplificado — "Do NOT use com.example.*" já está no _mandatory_prefix.
-        # Este bloco cobre apenas a proibição de inventar paths de import para tipos do projeto.
-        active_rules += (
-            "\n\n### IMPORT PROHIBITION\n"
-            "For project-specific types: derive import paths ONLY from ### IMPORTS PRESENT IN PRODUCTION CLASS.\n"
-            "If a type is not listed there and is not a standard JDK or Mockito/JUnit type, do NOT import it.\n"
-        )
-
-        # S3: regra preventiva para testes de campos nulos — evita que o LLM use enum values
-        # onde o método retorna null, causando falha do tipo "expected: <ACC> but was: <null>".
-        active_rules += (
-            "\n\n### NULL ASSERTIONS (MANDATORY)\n"
-            "When a test passes null as input for a field, the method may return null for that field.\n"
-            "In that case ALWAYS use assertNull(result.getField()) — NEVER assertEquals(EnumValue, result.getField()).\n"
-            "NEVER invent a non-null expected value for a field whose input was null unless the production code "
-            "explicitly defines a non-null default for that case.\n"
-        )
 
         file_start_time = time.time()
 
