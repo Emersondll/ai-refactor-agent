@@ -683,6 +683,86 @@ def get_failed_tracker(logs_dir: str = "logs") -> FailedFilesTracker:
 
 
 # ---------------------------------------------------------------------------
+# Surgical patch — deterministic one-line assertion fix
+# ---------------------------------------------------------------------------
+
+def _try_surgical_patch(test_code: str, maven_output: str) -> str | None:
+    """
+    Apply a one-line Python patch for assertion failures whose fix is deterministic.
+    Returns the patched file or None if the case isn't covered.
+
+    Covers three cases (mirrors S1/S4/G1 of _categorize_build_error):
+      1. expected=<null>, actual=<value> → assertNull(expr) → assertEquals("value", expr)
+      2. expected=<value>, actual=<null> → assertEquals(value, expr) → assertNull(expr)
+      3. both non-null, simple literal mismatch → replace expected with actual on that line
+
+    Maven line numbers can be slightly off (±3 lines); we search a small window around
+    the reported line to find the relevant assertion.
+    """
+    line_match = re.search(r'(\w+)\.\w+:(\d+)\s+expected:\s*<([^>]*)>\s*but was:\s*<([^>]*)>',
+                            maven_output)
+    if not line_match:
+        return None
+    line_no = int(line_match.group(2))
+    expected = line_match.group(3)
+    actual   = line_match.group(4)
+
+    lines = test_code.splitlines()
+    if line_no < 1 or line_no > len(lines):
+        return None
+
+    _WINDOW = 3  # Maven line numbers can be off by a few lines
+
+    def _candidate_indices() -> list[int]:
+        """Return 0-based line indices to try, starting from the reported line."""
+        result = []
+        for offset in range(0, _WINDOW + 1):
+            for delta in ([0] if offset == 0 else [offset, -offset]):
+                idx = line_no - 1 + delta
+                if 0 <= idx < len(lines) and idx not in result:
+                    result.append(idx)
+        return result
+
+    # Case 1: expected null, actual non-null and non-"null" → assertNull → assertEquals
+    if expected == "null" and actual and actual != "null":
+        _pat = re.compile(r'assertNull\s*\(\s*([^)]+)\s*\)')
+        for idx in _candidate_indices():
+            m = _pat.search(lines[idx])
+            if m:
+                expr = m.group(1).strip()
+                new_call = f'assertEquals("{actual}", {expr})'
+                lines[idx] = lines[idx].replace(m.group(0), new_call, 1)
+                return "\n".join(lines) + ("\n" if test_code.endswith("\n") else "")
+        return None
+
+    # Case 2: expected non-null, actual is null → assertEquals(X, expr) → assertNull(expr)
+    if actual == "null" and expected and expected != "null":
+        _pat = re.compile(r'assertEquals\s*\(\s*[^,]+,\s*([^)]+)\s*\)')
+        for idx in _candidate_indices():
+            m = _pat.search(lines[idx])
+            if m:
+                expr = m.group(1).strip()
+                new_call = f'assertNull({expr})'
+                lines[idx] = lines[idx].replace(m.group(0), new_call, 1)
+                return "\n".join(lines) + ("\n" if test_code.endswith("\n") else "")
+        return None
+
+    # Case 3: simple literal mismatch — replace expected with actual ON THAT LINE ONLY
+    if expected and actual and expected != "null" and actual != "null":
+        # Word-boundary replace to avoid "5" -> "50" turning "50" into "500"
+        _pat = re.compile(r'(?<![\w.])' + re.escape(expected) + r'(?![\w.])')
+        for idx in _candidate_indices():
+            if _pat.search(lines[idx]):
+                new_line = _pat.sub(actual, lines[idx], count=1)
+                if new_line != lines[idx]:
+                    lines[idx] = new_line
+                    return "\n".join(lines) + ("\n" if test_code.endswith("\n") else "")
+        return None
+
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Utilitários
 # ---------------------------------------------------------------------------
 
@@ -1717,6 +1797,16 @@ def generate_tests(repo_path: str, phase: str, rules: str,
                 repair_hint = _categorize_build_error(combined_out, _prod_imports)
                 error_history.append(f"Attempt {attempt + 1}: {repair_hint}")
                 log(f"  [{test_name}] Reparo {attempt + 1}/{MAX_VALIDATOR_RETRIES}: {repair_hint[:80]}...", "WARN")
+                _patched = _try_surgical_patch(test_code, combined_out)
+                if _patched is not None:
+                    log(f"  [{test_name}] Patch cirúrgico aplicado — sem LLM", "OK")
+                    write_file(test_path, _patched)
+                    test_code = _patched
+                    success, combined_out, coverage, missed_lines = \
+                        maven_test_with_coverage(repo_path, file_name)
+                    if success:
+                        continue
+                    # patch didn't fix it — fall through to LLM repair as normal
                 history_block = (
                     f"REPAIR HISTORY (do NOT repeat these mistakes):\n"
                     + "\n".join(error_history) + "\n\n"
