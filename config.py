@@ -12,11 +12,11 @@ load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 # Substituído por qwen3.5 (6.6GB) e gemma4 (9.6GB) que cabem na RAM.
 #
 # Modelos especializados por papel (Role-Based Models):
-MODEL_DOC   = "neural-chat:7b"     # (4.1GB) -> Javadoc / Documentação
-MODEL_STRUCT = "qwen2.5-coder:7b"   # (4.7GB) -> Estrutura / Nomenclatura (Melhor para Java)
-MODEL_CLEAN  = "gemma4:latest"     # (9.6GB) -> Clean Code / Testes
-MODEL_SOLID  = "qwen2.5-coder:14b" # (9.0GB) -> SOLID / Arquitetura (O Crítico)
-MODEL_RECOVERY  = "gemma4:latest"   # -> Autocura Local Especializada (Second Opinion)
+MODEL_DOC      = os.getenv("MODEL_DOC",      "qwen2.5-coder:7b")  # (4.7GB) -> Javadoc / Documentação (code-aware: não muda estrutura)
+MODEL_STRUCT   = os.getenv("MODEL_STRUCT",   "qwen2.5-coder:7b")  # (4.7GB) -> Estrutura / Nomenclatura (Melhor para Java)
+MODEL_CLEAN    = os.getenv("MODEL_CLEAN",    "gemma4:latest")      # (9.6GB) -> Clean Code / Testes
+MODEL_SOLID    = os.getenv("MODEL_SOLID",    "qwen2.5-coder:14b")  # (9.0GB) -> SOLID / Arquitetura (O Crítico)
+MODEL_RECOVERY = os.getenv("MODEL_RECOVERY", "qwen2.5-coder:14b")  # (9.0GB) -> Autocura — modelo DIFERENTE de MODEL_CLEAN (second opinion real)
 MODEL_REVIEWER  = os.getenv("MODEL_REVIEWER", MODEL_STRUCT)  # qwen2.5-coder:7b — revisor de diffs (rápido, sem swap de RAM)
 CLAUDE_MODEL        = "claude-sonnet-4-6"
 CLAUDE_API_KEY      = os.getenv("ANTHROPIC_API_KEY")
