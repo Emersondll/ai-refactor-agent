@@ -39,6 +39,19 @@ MAX_TEST_FILE_TIMEOUT_S = 1200  # 20 min máximo por arquivo de teste — escala
 
 _REASON_NO_CHANGE = "no_change"  # sinal: modelo confirmou que não há alterações
 
+# Common method name prefixes — short getters/setters that could be typos are recoverable.
+# Only long unique method names that can't be matched anywhere are flagged irrecoverable.
+_COMMON_GETTER_PREFIXES = ("get", "is", "set", "has", "find", "to", "of", "from")
+
+# Ultra-common JavaBean / Object method names — so generic that any class might have them.
+# Even if a specific class doesn't, the LLM is likely just confused, not hallucinating.
+_UBIQUITOUS_METHOD_NAMES = frozenset({
+    "getName", "getValue", "getType", "getId", "getKey", "getDate",
+    "setName", "setValue", "setType", "setId", "setKey", "setDate",
+    "isValid", "isActive", "isEnabled", "isEmpty", "toString", "hashCode",
+    "equals", "compareTo", "size", "length",
+})
+
 # P2: métodos de assertion JUnit 5 — ausência = falta de static import, não método inexistente
 _JUNIT_ASSERTION_METHODS = frozenset({
     "assertTrue", "assertFalse", "assertEquals", "assertNotEquals",
@@ -336,6 +349,65 @@ def _fix_constructor_calls(test_code: str, dep_context: str) -> str:
                     out_parts.append(full_call)  # unsupported type — leave alone
         i = j
     return "".join(out_parts)
+
+
+def _is_irrecoverable_hallucination(repair_hint: str, prod_imports: list[str]) -> bool:
+    """Return True when the repair hint indicates a hallucination that no retry
+    can fix — the LLM referenced a method or class that does not exist anywhere
+    findable, and no deterministic injector (S1, S2, P2 static import) can help.
+
+    Conservative: returns False whenever we are uncertain.
+    """
+    if not repair_hint:
+        return False
+
+    # Build the set of class short-names known to exist
+    known_classes: set[str] = set(_JDK_IMPORT_MAP.keys())
+    for imp in prod_imports or []:
+        m = re.match(r'import\s+(?:static\s+)?([\w.]+)(?:\.\*)?;', imp)
+        if m:
+            known_classes.add(m.group(1).split(".")[-1])
+    # JUnit + Mockito + Spring test classes that S1/S2 don't currently inject but
+    # are clearly recoverable (the LLM typically just forgot the import).
+    known_classes.update({
+        "Test", "BeforeEach", "AfterEach", "BeforeAll", "AfterAll",
+        "Mock", "InjectMocks", "MockitoExtension", "ExtendWith",
+        "Assertions", "MockMvc", "ResponseEntity",
+    })
+
+    # CASE A: IMPORT ERROR with a hallucinated class
+    # Hint looks like: "IMPORT ERROR: Class 'FooBar' not found" or "Class `FooBar` is missing its import"
+    m = re.search(r"IMPORT\s+ERROR:.*?[Cc]lass\s+['`](\w+)['`]", repair_hint, re.DOTALL)
+    if m:
+        cls = m.group(1)
+        # If the class IS findable somewhere (JDK map, prod imports, common JUnit), recoverable
+        if cls in known_classes:
+            return False
+        # If it's a "STATIC IMPORT ERROR" (handled by P2/S2 injection), recoverable
+        if "STATIC IMPORT" in repair_hint:
+            return False
+        # Not findable AND not a deterministic-injection case → irrecoverable
+        return True
+
+    # CASE B: METHOD ERROR with a missing method name
+    # Hint: "METHOD ERROR: You called 'method <name>(...)'"
+    m = re.search(r"METHOD\s+ERROR:.*?method\s+(\w+)\s*\(", repair_hint, re.DOTALL)
+    if m:
+        method = m.group(1)
+        # Ultra-common JavaBean names are always treated as recoverable typos.
+        if method in _UBIQUITOUS_METHOD_NAMES:
+            return False
+        # JUnit assertion methods → static import case (P2 handles)
+        if "STATIC IMPORT" in repair_hint:
+            return False
+        # Very short method names (≤ 5 chars, e.g. "get", "set") — too ambiguous to flag.
+        if len(method) <= 5:
+            return False
+        # Long unique-looking method name (≥ 6 chars) not in the ubiquitous set → irrecoverable
+        return True
+
+    # All other error categories (ASSERTION, TYPE MISMATCH, CONSTRUCTOR, RECORD, etc.) → recoverable
+    return False
 
 
 def _categorize_build_error(output: str, prod_imports: list | None = None) -> str:
@@ -1997,6 +2069,12 @@ def generate_tests(repo_path: str, phase: str, rules: str,
 
             if not success:
                 repair_hint = _categorize_build_error(combined_out, _prod_imports)
+                if _is_irrecoverable_hallucination(repair_hint, _prod_imports):
+                    log(
+                        f"  [{test_name}] Falha irrecuperável detectada (alucinação de símbolo) — pulando reparos restantes",
+                        "WARN",
+                    )
+                    break
                 error_history.append(f"Attempt {attempt + 1}: {repair_hint}")
                 log(f"  [{test_name}] Reparo {attempt + 1}/{MAX_VALIDATOR_RETRIES}: {repair_hint[:80]}...", "WARN")
                 _patched = _try_surgical_patch(test_code, combined_out)
