@@ -138,7 +138,207 @@ def _auto_inject_missing_imports(test_code: str, prod_imports: list[str]) -> str
     return test_code
 
 
-def _categorize_build_error(output: str, prod_imports: list[str] | None = None) -> str:
+# ---------------------------------------------------------------------------
+# Constructor-call validator — deterministic pre-Maven fix (Fix F)
+# ---------------------------------------------------------------------------
+
+_STRING_SAMPLES    = ['"sampleA"', '"sampleB"', '"sampleC"', '"sampleD"', '"sampleE"', '"sampleF"']
+_BIGDECIMAL_SAMPLES = ['new BigDecimal("100.00")', 'new BigDecimal("250.50")']
+
+
+def _ctor_sample_value(java_type: str) -> str | None:
+    """Return a sample literal for a Java type, or None if unsupported."""
+    base = re.sub(r'<[^>]+>', '', java_type.strip()).strip()
+    table = {
+        "String":        '"sampleA"',
+        "BigDecimal":    'new BigDecimal("100.00")',
+        "BigInteger":    'BigInteger.valueOf(100)',
+        "Timestamp":     'Timestamp.valueOf("2023-01-15 10:00:00")',
+        "long":          '1L',
+        "Long":          '1L',
+        "int":           '1',
+        "Integer":       '1',
+        "double":        '1.0',
+        "Double":        '1.0',
+        "boolean":       'true',
+        "Boolean":       'true',
+        "LocalDate":     'LocalDate.of(2023, 1, 15)',
+        "LocalDateTime": 'LocalDateTime.of(2023, 1, 15, 10, 0)',
+    }
+    return table.get(base)
+
+
+def _ctor_sample_value_at(java_type: str, position: int, used_counts: dict) -> str | None:
+    """Sample value picked by arg position (0-based) for String, and by occurrence for BigDecimal."""
+    t = re.sub(r'<[^>]+>', '', java_type.strip()).strip()
+    if t == "String":
+        # Use the absolute arg position so each arg slot gets a distinct label
+        return _STRING_SAMPLES[position % len(_STRING_SAMPLES)]
+    if t == "BigDecimal":
+        i = used_counts.setdefault("BigDecimal", 0)
+        used_counts["BigDecimal"] = i + 1
+        return _BIGDECIMAL_SAMPLES[i % len(_BIGDECIMAL_SAMPLES)]
+    return _ctor_sample_value(java_type)
+
+
+def _parse_constructor_hints(dep_context: str) -> dict:
+    """Parse // CONSTRUCTOR CALL: lines from dep_context.
+
+    Returns {ClassName: [Type1, Type2, ...]} for each hint found.
+    """
+    result: dict = {}
+    if not dep_context:
+        return result
+    for m in re.finditer(
+        r'//\s*CONSTRUCTOR\s+CALL:\s*new\s+(\w+)\s*\(([^)]*)\)',
+        dep_context,
+    ):
+        cls = m.group(1)
+        params_raw = m.group(2).strip()
+        if not params_raw:
+            result[cls] = []
+            continue
+        types: list = []
+        for part in params_raw.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            tokens = part.split()
+            if len(tokens) >= 2:
+                types.append(tokens[-2])
+            else:
+                types.append(tokens[0])
+        result[cls] = types
+    return result
+
+
+def _split_top_level_args(args_str: str) -> list:
+    """Split a comma-separated argument list respecting balanced ( ), < >, and strings."""
+    if not args_str.strip():
+        return []
+    args: list = []
+    depth_paren = 0
+    depth_angle = 0
+    in_string = False
+    string_char = ""
+    current: list = []
+    i = 0
+    while i < len(args_str):
+        c = args_str[i]
+        if in_string:
+            current.append(c)
+            if c == "\\" and i + 1 < len(args_str):
+                current.append(args_str[i + 1])
+                i += 2
+                continue
+            if c == string_char:
+                in_string = False
+            i += 1
+            continue
+        if c in ('"', "'"):
+            in_string = True
+            string_char = c
+            current.append(c)
+        elif c == "(":
+            depth_paren += 1
+            current.append(c)
+        elif c == ")":
+            depth_paren -= 1
+            current.append(c)
+        elif c == "<":
+            depth_angle += 1
+            current.append(c)
+        elif c == ">":
+            depth_angle -= 1
+            current.append(c)
+        elif c == "," and depth_paren == 0 and depth_angle == 0:
+            args.append("".join(current).strip())
+            current = []
+        else:
+            current.append(c)
+        i += 1
+    if current:
+        args.append("".join(current).strip())
+    return [a for a in args if a]
+
+
+def _fix_constructor_calls(test_code: str, dep_context: str) -> str:
+    """For each `new ClassName(args)` in test_code, if the dep_context hint shows
+    a different arg count, rewrite with deterministic sample values per type.
+
+    Returns the (possibly modified) test_code. Pure Python — runs before Maven.
+    Only rewrites when expected count != actual count AND all required types
+    are supported by the sample-value table. Otherwise leaves the call alone.
+    """
+    hints = _parse_constructor_hints(dep_context)
+    if not hints:
+        return test_code
+
+    out_parts: list = []
+    i = 0
+    while i < len(test_code):
+        m = re.search(r'new\s+(\w+)\s*\(', test_code[i:])
+        if not m:
+            out_parts.append(test_code[i:])
+            break
+        # Append everything before the match
+        out_parts.append(test_code[i : i + m.start()])
+        class_name = m.group(1)
+        # Find balanced closing paren
+        start = i + m.end()  # position right after `new X(`
+        depth = 1
+        in_str = False
+        sc = ""
+        j = start
+        while j < len(test_code) and depth > 0:
+            c = test_code[j]
+            if in_str:
+                if c == "\\" and j + 1 < len(test_code):
+                    j += 2
+                    continue
+                if c == sc:
+                    in_str = False
+            elif c in ('"', "'"):
+                in_str = True
+                sc = c
+            elif c == "(":
+                depth += 1
+            elif c == ")":
+                depth -= 1
+            j += 1
+        if depth != 0:
+            # Unbalanced — bail on this match, emit what we found and move on
+            out_parts.append(test_code[i + m.start() : start])
+            i = start
+            continue
+        args_str = test_code[start : j - 1]
+        full_call = test_code[i + m.start() : j]
+        if class_name not in hints:
+            out_parts.append(full_call)
+        else:
+            expected_types = hints[class_name]
+            actual_args = _split_top_level_args(args_str)
+            if len(actual_args) == len(expected_types):
+                out_parts.append(full_call)  # count matches — leave alone
+            else:
+                used_counts: dict = {}
+                sample_args: list = []
+                supported = True
+                for t in expected_types:
+                    v = _ctor_sample_value_at(t, len(sample_args), used_counts)
+                    if v is None:
+                        supported = False
+                        break
+                    sample_args.append(v)
+                if supported:
+                    out_parts.append(f"new {class_name}({', '.join(sample_args)})")
+                else:
+                    out_parts.append(full_call)  # unsupported type — leave alone
+        i = j
+    return "".join(out_parts)
+
+
+def _categorize_build_error(output: str, prod_imports: list | None = None) -> str:
     """Analisa o erro Maven e retorna instrução de reparo direcionada."""
     out = output.lower()
 
@@ -1769,6 +1969,8 @@ def generate_tests(repo_path: str, phase: str, rules: str,
 
         # S1: injeta imports ausentes antes de gravar no disco (inclui self-import via _s1_imports)
         test_code = _auto_inject_missing_imports(test_code, _s1_imports)
+        # Fix F: corrige chamadas de construtor com número errado de argumentos (pre-Maven)
+        test_code = _fix_constructor_calls(test_code, test_dep_context)
 
         os.makedirs(os.path.dirname(test_path), exist_ok=True)
         write_file(test_path, test_code)
@@ -1868,6 +2070,8 @@ def generate_tests(repo_path: str, phase: str, rules: str,
 
             # S1: injeta imports ausentes no código corrigido antes de gravar (inclui self-import)
             corrected_test = _auto_inject_missing_imports(corrected_test, _s1_imports)
+            # Fix F: corrige chamadas de construtor com número errado de argumentos (pre-Maven)
+            corrected_test = _fix_constructor_calls(corrected_test, test_dep_context)
             write_file(test_path, corrected_test)
             test_code = corrected_test
             success, combined_out, coverage, missed_lines = maven_test_with_coverage(repo_path, file_name)
