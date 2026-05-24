@@ -369,7 +369,7 @@ python main.py
 |-----------|--------|-----------|
 | `MODEL_DOC` | `qwen2.5-coder:7b` | Javadoc e `final` (code-aware: não muda estrutura) |
 | `MODEL_STRUCT` | `qwen2.5-coder:7b` | Estrutura e nomenclatura |
-| `MODEL_CLEAN` | `gemma4:latest` | Clean code e testes |
+| `MODEL_CLEAN` | `qwen2.5-coder:14b` | Clean code e testes (code-specialized; mesmo modelo de SOLID/RECOVERY → só 2 modelos físicos na RAM) |
 | `MODEL_SOLID` | `qwen2.5-coder:14b` | SOLID e revisão crítica |
 | `MODEL_RECOVERY` | `qwen2.5-coder:14b` | Repair loop — **diferente** de MODEL_CLEAN (segunda opinião real) |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Endereço do Ollama |
