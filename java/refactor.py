@@ -93,11 +93,57 @@ _JDK_IMPORT_MAP: dict[str, str] = {
 }
 
 
-def _auto_inject_missing_imports(test_code: str, prod_imports: list[str]) -> str:
+def build_project_imports(repo_path: str) -> dict[str, str]:
+    """Scan src/main/java/ under repo_path and return {ShortName: "import full.path.ShortName;"}.
+
+    Only PUBLIC classes/enums/interfaces/records are exported (a test
+    cannot reference a package-private type from a different package).
+
+    Name collision policy: last-seen wins. Document as known limitation.
+    Returns {} if src/main/java/ doesn't exist.
+    """
+    main_java = os.path.join(repo_path, "src", "main", "java")
+    if not os.path.isdir(main_java):
+        return {}
+
+    result: dict[str, str] = {}
+    decl_re = re.compile(
+        r'public\s+(?:(?:final|abstract|sealed|non-sealed|static)\s+)*'
+        r'(?:class|interface|enum|record|@interface)\s+(\w+)',
+        re.MULTILINE,
+    )
+    pkg_re = re.compile(r'^package\s+([\w.]+)\s*;', re.MULTILINE)
+
+    for root, _, files in os.walk(main_java):
+        for fname in files:
+            if not fname.endswith(".java"):
+                continue
+            full = os.path.join(root, fname)
+            try:
+                with open(full, encoding="utf-8") as f:
+                    src = f.read()
+            except Exception:
+                continue
+            pkg_m = pkg_re.search(src)
+            if not pkg_m:
+                continue
+            pkg = pkg_m.group(1)
+            for m in decl_re.finditer(src):
+                short = m.group(1)
+                result[short] = f"import {pkg}.{short};"
+    return result
+
+
+def _auto_inject_missing_imports(
+    test_code: str,
+    prod_imports: list[str],
+    project_imports: dict[str, str] | None = None,
+) -> str:
     """
     S1: Após geração LLM, injeta deterministicamente imports ausentes no teste.
-    Cruza nomes de classe usados no código com prod_imports (do fonte de produção)
-    e _JDK_IMPORT_MAP. Não envolve LLM — é uma correção estrutural pura.
+    Cruza nomes de classe usados no código com prod_imports (do fonte de produção),
+    _JDK_IMPORT_MAP e project_imports (mapa project-wide, Opção 6).
+    Não envolve LLM — é uma correção estrutural pura.
     """
     # Monta mapa nome-curto → import completo a partir dos imports de produção
     prod_map: dict[str, str] = {}
@@ -126,6 +172,8 @@ def _auto_inject_missing_imports(test_code: str, prod_imports: list[str]) -> str
             to_inject.append(prod_map[cls])
         elif cls in _JDK_IMPORT_MAP:
             to_inject.append(_JDK_IMPORT_MAP[cls])
+        elif project_imports and cls in project_imports:
+            to_inject.append(project_imports[cls])
 
     # P2b: se o teste usa métodos de assertion JUnit sem import static, injeta deterministicamente
     _STATIC_JUNIT = "import static org.junit.jupiter.api.Assertions.*;"
@@ -138,6 +186,7 @@ def _auto_inject_missing_imports(test_code: str, prod_imports: list[str]) -> str
         return test_code
 
     # Injeta após o último import existente — ou após o package se não há imports
+    # — ou no topo do arquivo se não há nem package nem imports (ex.: snippets de teste)
     last_import = None
     for m in re.finditer(r'^import\s+[\w.*]+;', test_code, re.MULTILINE):
         last_import = m
@@ -148,7 +197,8 @@ def _auto_inject_missing_imports(test_code: str, prod_imports: list[str]) -> str
     if pkg:
         pos = pkg.end()
         return test_code[:pos] + "\n\n" + "\n".join(sorted(set(to_inject))) + test_code[pos:]
-    return test_code
+    # Fallback: nenhum package nem import — prepend ao topo
+    return "\n".join(sorted(set(to_inject))) + "\n" + test_code
 
 
 # ---------------------------------------------------------------------------
@@ -1840,6 +1890,9 @@ def generate_tests(repo_path: str, phase: str, rules: str,
     any_changed = False
     main_files  = get_java_files(repo_path, tests=False)
 
+    # Opção 6: project-wide import map, computed once per generate_tests call.
+    _project_imports = build_project_imports(repo_path)
+
     for main_file in main_files:
         original  = read_file(main_file)
         file_name = os.path.basename(main_file)
@@ -2063,7 +2116,7 @@ def generate_tests(repo_path: str, phase: str, rules: str,
             continue
 
         # S1: injeta imports ausentes antes de gravar no disco (inclui self-import via _s1_imports)
-        test_code = _auto_inject_missing_imports(test_code, _s1_imports)
+        test_code = _auto_inject_missing_imports(test_code, _s1_imports, project_imports=_project_imports)
         # Fix F: corrige chamadas de construtor com número errado de argumentos (pre-Maven)
         test_code = _fix_constructor_calls(test_code, test_dep_context)
 
@@ -2170,7 +2223,7 @@ def generate_tests(repo_path: str, phase: str, rules: str,
                 continue  # não escreve o arquivo — força novo reparo com erro de package
 
             # S1: injeta imports ausentes no código corrigido antes de gravar (inclui self-import)
-            corrected_test = _auto_inject_missing_imports(corrected_test, _s1_imports)
+            corrected_test = _auto_inject_missing_imports(corrected_test, _s1_imports, project_imports=_project_imports)
             # Fix F: corrige chamadas de construtor com número errado de argumentos (pre-Maven)
             corrected_test = _fix_constructor_calls(corrected_test, test_dep_context)
             write_file(test_path, corrected_test)
