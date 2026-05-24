@@ -28,7 +28,14 @@ Agente autônomo de refatoração Java que roda **100% localmente** via Ollama.
 ```
 main.py
   ├── HEALTH_CHECK                 → maven_test (valida estado inicial)
-  ├── AUDIT_COVERAGE               → java/refactor.py (gera testes TDD até ≥ 90%)
+  ├── AUDIT_COVERAGE               → java/refactor.py · generate_tests()
+  │     ├── P0: data holder?       → java/data_holder_test_gen.py (template Python, sem LLM)
+  │     │                                 ├── sucesso → commit_single_file (P2) + continue
+  │     │                                 └── falha   → fallback para LLM
+  │     └── LLM path               → call_ai (seed fixo P1) → repair loop
+  │                                       ├── P4: _try_surgical_patch (Python, antes do LLM)
+  │                                       └── call_ai_with_correction (fallback LLM)
+  │
   ├── Fases 01–14 (loop sequencial via phases/configs/*.yml)
   │     ├── tool: community        → java/community_runner.py
   │     ├── tool: llm              → java/llm_runner.py
@@ -37,12 +44,13 @@ main.py
   │     │                               └── (sem flag)          → llm_runner loop por arquivo
   │     ├── tool: flow             → java/flow_runner.py
   │     └── tool: flow-dry         → java/flow_runner.py (dry_check)
+  │
   ├── AUDIT_COVERAGE_POST_DIP (S5) → java/refactor.py (segunda passagem — classes liberadas pelo solid-dip)
-  ├── SANITIZATION                 → java/sanitizer.py (imports mortos, código inativo)
+  ├── SANITIZATION                 → java/sanitizer.py (imports mortos, código inativo via regex)
   ├── JAVADOC                      → java/javadoc_runner.py (Javadoc em métodos públicos)
   ├── FINAL_VALIDATION             → maven_test + JaCoCo (cobertura final)
   ├── REPORT                       → java/report_runner.py (relatório Markdown por classe)
-  └── COMMIT_PUSH                  → git_utils/repo.py (branch refactor/ai-agent-automation)
+  └── COMMIT_PUSH                  → git_utils/repo.py (branch refactor/ai-agent-automation, push final)
 ```
 
 ### As 16 Fases
@@ -114,12 +122,28 @@ Para cada arquivo Java:
 
 ---
 
+## Determinismo do Pipeline (P0–P4)
+
+Cinco mecanismos eliminam o whack-a-mole de fixes reativos sobre geração não-determinística:
+
+| ID | Onde | O quê |
+|----|------|-------|
+| **P0** | `java/data_holder_test_gen.py` (novo) + `generate_tests()` | Gerador determinístico de testes para data holders puros (`@Document`/`@Entity`/POJO com só campos + ctor + getters/setters). `is_pure_data_holder()` exige `return field;` e `this.field = param;` literais (ternário/método/concat reprovam). Tipos suportados: `String`, `BigDecimal`, `BigInteger`, `Timestamp` (formato SQL), `Long`/`Integer`/`Double`/`Boolean`, `LocalDate`, `LocalDateTime`. Outros tipos → `None` → fallback LLM. Bypassa LLM completamente — zero repair loop, totalmente reproduzível. |
+| **P1** | `config.py` + `ai/model.py · call_model()` | `OLLAMA_SEED=42` (override via env) injetado em `options`. Mesmo prompt → mesma saída run-a-run. Fixes "grudam" em vez de re-rolar. Repair loop não é afetado: muda o prompt a cada tentativa. |
+| **P2** | `git_utils/repo.py · commit_single_file()` | Commit local por arquivo aceito (sem push) em ambos os pontos de aceitação (determinístico P0 e LLM). Run interrompido não perde trabalho — próximo run vê os commits e pula. `commit_and_push` no final ainda dá `push` em tudo. |
+| **P3** | `java/refactor.py · _build_active_rules()` (helper extraído) | Consolidou 12+ blocos `### ... (MANDATORY)` do `active_rules`. Fundiu `IMPORTS PRESENT` + `SELF-IMPORT` + `IMPORT PROHIBITION` em um único `### IMPORTS`. Cada bloco condicional comprimido para ≤4 linhas. Mandatoriedade declarada uma vez no topo. Regression test (`tests/java/test_active_rules_preservation.py`) verifica 18 frases-chave preservadas de todos os fixes anteriores. |
+| **P4** | `java/refactor.py · _try_surgical_patch()` | Patch Python de uma linha para erros de asserção determinísticos: `assertNull(expr)` ↔ `assertEquals("X", expr)` (S1/S4) e value swap simples (G1). Tentado ANTES de `call_ai_with_correction` no repair loop. Se o patch passa no build → `continue`; senão fallback LLM. Janela ±3 linhas para tolerar off-by-N do Maven. |
+
+> **Por que importa:** o LLM (Ollama, 7–9B) é não-determinístico. Sem isso, cada run regenerava testes com variações novas que caíam em falhas novas — handlers de erro eram adicionados sem cessar. P0 elimina o LLM para tarefas mecânicas. P1 torna o que sobra reproduzível. P2 dá crash-safety. P3 reduz ruído de prompt. P4 evita regeneração de arquivo inteiro para edições de uma linha.
+
+---
+
 ## Fase Javadoc (pós-sanitização)
 
 ```
 Para cada arquivo Java de produção:
   ├── _all_public_methods_documented? → FILE_SKIPPED (already_documented)
-  ├── call_ai(full_class, regras javadoc)        ← MODEL_DOC (neural-chat:7b)
+  ├── call_ai(full_class, regras javadoc)        ← MODEL_DOC (qwen2.5-coder:7b, code-aware)
   │     └── LLM adiciona /** */ onde falta — sem tocar em corpos de método
   ├── _strip_comments(new_code) == _strip_comments(original)?
   │     ├── NÃO → J1: retry com MODEL_STRUCT (qwen2.5-coder:7b) + prompt de crítica
@@ -167,9 +191,14 @@ report_runner.run_report()
 | `java/flow_runner.py` | Refatoração por cadeia de endpoint; DRY check; repair loop; emite eventos exec_logger |
 | `java/flow_mapper.py` | Análise estática — mapeia endpoints, resolve interface→impl |
 | `java/community_runner.py` | Executa ferramentas OpenRewrite / GJF / PMD |
-| `java/refactor.py` | Geração de testes TDD — `generate_tests()` com repair loop e JaCoCo |
+| `java/refactor.py` | Geração de testes TDD — `generate_tests()` com repair loop, `_build_active_rules()` (P3), `_try_surgical_patch()` (P4), `_categorize_build_error()` com handlers A–F/S1–S4/P1/P2/G1 |
+| `java/data_holder_test_gen.py` | **(P0)** Gerador determinístico de testes para data holders puros — Python template, sem LLM |
+| `java/validator.py` | `is_valid_java`, `validate_class_name_matches_file`, `validate_package_matches_path` |
+| `java/sanitizer.py` | Sanitização final — remove métodos privados não usados via regex (escopo estreito) |
+| `java/context.py` | `get_dependency_context()` — extrai esqueleto da classe + `// CONSTRUCTOR CALL:` hint |
+| `java/compiler.py` | `maven_test`, `maven_test_with_coverage` (JaCoCo), `get_global_coverage`; `ENV_WRAPPER` injeta `sdk use java 22-open` |
 | `java/llm_reviewer.py` | Revisa diff pós-fase com `review_criteria` → APPROVE/REJECT/SKIP |
-| `java/javadoc_runner.py` | Insere Javadoc em métodos públicos; heurística de detecção de cobertura existente |
+| `java/javadoc_runner.py` | Insere Javadoc em métodos públicos; J1 retry com `MODEL_STRUCT`; filtro de data holders |
 | `java/report_runner.py` | Gera relatório Markdown narrativo por classe; fallback estruturado sem LLM |
 
 ---
@@ -189,7 +218,7 @@ memory/cache.py
 
 ## Skills LLM
 
-Todas em `~/.claude/skills/<nome>/SKILL.md`. Carregadas via `load_skill(name, section="LLM INSTRUCTIONS")` e injetadas como instrução de prompt nas LLMs locais (Ollama).
+10 skills em `skills/<nome>/SKILL.md` na raiz do projeto. Carregadas via `core.utils.load_skill(name, section="...")` e injetadas como instrução de prompt nas LLMs locais (Ollama). São snippets de prompt em Markdown — NÃO são subagentes Claude.
 
 ### Mapa de execução
 
@@ -275,6 +304,21 @@ python3 -m http.server 8000
 - **Test Timeout Margin (T1)**: `TIMEOUT_TEST` aumentado de 300s para 420s — o custo real por arquivo é ~50s (construção do KV cache do prompt no Ollama) + ~250s (geração), totalizando ~300s. Com o limite anterior o attempt 1 expirava sistematicamente para cada arquivo novo; o attempt 2 sempre sucedia porque o KV cache já estava computado. Com 420s o attempt 1 passa com margem mesmo para prompts maiores ou variação de hardware
 - **Permanent Skip Expiry (P1)**: `_AUTO_EXPIRE_STACK_PATTERNS = ["com.example"]` em `refactor.py`. `FailedFilesTracker.reset()` descarta automaticamente entradas `permanent_skip` cujo `stack_trace` contenha um padrão de bug já corrigido no pipeline — ex: package hallucination `com.example.*` corrigida pelo F2 (Package Guard). Na prática, TransactionCodeModelTest e TransactionControllerTest que foram bloqueados permanentemente antes do F2 voltam à fila no próximo run sem intervenção manual. `clear_permanent_skips(file_path=None)` disponível para remoção manual (arquivo específico ou todos)
 - **JUnit Static Import Detection (P2)**: `_JUNIT_ASSERTION_METHODS` frozenset com 18 métodos JUnit 5 (`assertTrue`, `assertEquals`, `assertNull`, etc.). `_categorize_build_error()` no branch `METHOD ERROR` extrai o nome do método com regex e, se for um método JUnit, retorna `STATIC IMPORT ERROR` com a linha exata a adicionar (`import static org.junit.jupiter.api.Assertions.*;`) — em vez de "método não existe na classe", que levava o LLM a corrigir o problema errado e consumir as 3 tentativas de reparo até permanent_skip. `_auto_inject_missing_imports()` também injeta o import static deterministicamente quando detecta uso de assertions sem ele, antes mesmo do repair loop
+- **A — Constructor Type Hints**: `_extract_simplified_header()` em `context.py` agora inclui o tipo de cada parâmetro no hint `// CONSTRUCTOR CALL:` (ex: `new Foo(String account, BigDecimal amount, Long version)`), não apenas o nome. Leitura de parênteses balanceados suporta anotações como `@JsonProperty("x")` em records sem quebrar no `)` interno
+- **B — Expected Class in Repair Prompt**: `_build_validator_correction_prompt` em `ai/model.py` ganhou parâmetro `expected_class` — usa o nome do arquivo de destino (ex: `MerchantCategoryCodesServiceImplTest`) em vez do nome da classe de produção, impedindo o LLM de continuar abreviando o nome no repair loop de INTEGRITY ERROR
+- **C — Data Holder Javadoc Skip**: `javadoc_runner.py` pula `@Document`/`@Entity`/record/enum com razão `data_holder` antes de qualquer chamada LLM — zero tokens em classes onde Javadoc adiciona nada
+- **D — Ollama VRAM Unload Pre-Javadoc**: `main.py` descarrega `MODEL_CLEAN` via `keep_alive=0` antes da fase JAVADOC — libera VRAM saturada após ~3h de geração de testes e evita cascata de timeouts
+- **E — BigDecimal→Long Handler**: handler específico em `_categorize_build_error` para `incompatible types: BigDecimal cannot be converted to Long` — retorna `"Use 1L for Long literals or Long.valueOf(1)"` em vez de cair no handler genérico de ResponseEntity
+- **F — java.sql.Timestamp Trinity**: 3 camadas para o formato SQL (espaço, não `T`): `Timestamp` no `_JDK_IMPORT_MAP` (auto-inject); regra preventiva `### JAVA SQL TIMESTAMP CONSTRUCTION` quando classe usa `java.sql.Timestamp`; handler de primeira prioridade em `_categorize_build_error` para `IllegalArgumentException + timestamp format` retornando instrução cirúrgica
+- **G — Single-Language Prompts**: `soul.md` traduzido integralmente para inglês — todo prompt agora é 100% EN, eliminando confusão de idioma do LLM (PT no soul + EN nos constraints). `report_runner.py` mantém PT intencionalmente (relatório para o usuário, não para o LLM)
+- **H — English Validator Messages**: `validate_class_name_matches_file` em `validator.py` traduzido para EN — mensagens em `failed_files.json` agora consistentes com o resto do log
+- **I — Stack+Reason Auto-Expire**: `_AUTO_EXPIRE_STACK_PATTERNS` expandido com padrões pós-A (`actual and formal argument lists differ in length`) e pós-H (`O arquivo se chama`). `FailedFilesTracker.reset()` agora concatena `stack_trace + reason` antes de checar padrões — `BalanceServiceImplTest` (padrão em stack_trace) e `MerchantCategoryCodesServiceImplTest` (padrão em reason) desbloqueados automaticamente
+- **P0 — Deterministic Data Holder Tests**: classes puras (`@Document`/`@Entity`/POJO com só campos+ctor+getters/setters) bypassam o LLM. `is_pure_data_holder()` exige `return field;` e `this.field = param;` literais. Tabela de tipos suportados (String, BigDecimal, Timestamp SQL format, Long, etc.). Tipo não suportado → `None` → fallback LLM. **Elimina o LLM para a maior fonte histórica de falhas.**
+- **P1 — Fixed Ollama Seed**: `OLLAMA_SEED=42` injetado em `call_model` options torna geração reproduzível run-a-run. Repair loop não é afetado (muda o prompt a cada tentativa)
+- **P2 — Per-File Commit**: `commit_single_file` em `git_utils/repo.py` chamado em ambos os pontos de aceitação de `generate_tests` (P0 determinístico + LLM). Run interrompido preserva os testes aceitos
+- **P3 — Slim active_rules**: helper `_build_active_rules()` consolidou 12+ blocos `### MANDATORY` (IMPORTS PRESENT + SELF-IMPORT + IMPORT PROHIBITION → único `### IMPORTS`; condicionais compactados a ≤4 linhas; mandatoriedade declarada uma vez). Regression test verifica 18 frases-chave preservadas
+- **P4 — Surgical Python Patch**: `_try_surgical_patch()` aplica patch de uma linha para asserções determinísticas (`assertNull`↔`assertEquals` + value swap) ANTES de `call_ai_with_correction`. Janela ±3 linhas para off-by-N do Maven. Elimina regeneração de arquivo inteiro para erros conhecidos
+- **S4 — assertNull Mirror Handler**: handler em `_categorize_build_error` para `expected: <null> but was: <X>` quando X é valor real não-null (espelho do S1) — retorna instrução de substituir `assertNull(expr)` por `assertEquals("X", expr)`. Regra preventiva `### SETTER/GETTER TEST PATTERN` no `active_rules` quando classe tem construtor com parâmetros
 
 ---
 
@@ -323,12 +367,13 @@ python main.py
 
 | Parâmetro | Padrão | Descrição |
 |-----------|--------|-----------|
-| `MODEL_DOC` | `neural-chat:7b` | Javadoc e `final` |
+| `MODEL_DOC` | `qwen2.5-coder:7b` | Javadoc e `final` (code-aware: não muda estrutura) |
 | `MODEL_STRUCT` | `qwen2.5-coder:7b` | Estrutura e nomenclatura |
 | `MODEL_CLEAN` | `gemma4:latest` | Clean code e testes |
 | `MODEL_SOLID` | `qwen2.5-coder:14b` | SOLID e revisão crítica |
-| `MODEL_RECOVERY` | `gemma4:latest` | Repair loop |
+| `MODEL_RECOVERY` | `qwen2.5-coder:14b` | Repair loop — **diferente** de MODEL_CLEAN (segunda opinião real) |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Endereço do Ollama |
+| `OLLAMA_SEED` | `42` | **(P1)** Seed fixo nas options do Ollama — geração reproduzível run-a-run |
 
 #### Flags de execução
 
@@ -346,41 +391,65 @@ python main.py
 ## Estrutura do Projeto
 
 ```
-ai/                     # Prompts, roteamento de modelos, compressão
+ai/                          # Prompts, modelos, compressão, roteamento
+  prompt.py                  # _SOUL + BASE_CONSTRAINTS_TEST + build_prompt
+  model.py                   # call_model (com OLLAMA_SEED P1), call_ai, repair loop
+  agent_router.py            # select_agent_priority por file_type/complexity
+  compressor.py              # LLMLingua (apenas em dep_context, nunca em código)
+  sanitizer.py               # clean_output: limpa resposta LLM
+  context7_client.py         # Docs ao vivo (opt-in)
 java/
-  method_extractor.py   # Extrai MethodDef sem AST
-  class_builder.py      # compress / merge / build_method_context
-  method_runner.py      # Runner método a método e classe completa
-  llm_runner.py         # Dispatch; _is_structural_type()
-  flow_runner.py        # Refatoração por fluxo; DRY check
-  flow_mapper.py        # Análise estática de endpoint chains
-  community_runner.py   # OpenRewrite / GJF / PMD
-  llm_reviewer.py       # APPROVE/REJECT/SKIP por diff
-  refactor.py           # Geração de testes TDD
-  javadoc_runner.py     # Javadoc em métodos públicos
-  report_runner.py      # Relatório Markdown narrativo por classe
+  refactor.py                # generate_tests, _build_active_rules (P3), _try_surgical_patch (P4),
+                             #   _categorize_build_error, FailedFilesTracker
+  data_holder_test_gen.py    # (P0) Gerador determinístico — sem LLM
+  validator.py               # is_valid_java, validate_class_name/package
+  context.py                 # get_dependency_context, // CONSTRUCTOR CALL: hints
+  compiler.py                # maven_test, maven_test_with_coverage (JaCoCo)
+  method_extractor.py        # MethodDef sem AST
+  class_builder.py           # compress / merge / build_method_context
+  method_runner.py           # Runner método a método e classe completa
+  llm_runner.py              # Dispatch; _is_structural_type()
+  flow_runner.py             # Refatoração por fluxo; DRY check
+  flow_mapper.py             # Análise estática de endpoint chains
+  community_runner.py        # OpenRewrite / GJF / PMD
+  llm_reviewer.py            # APPROVE/REJECT/SKIP por diff
+  sanitizer.py               # Sanitização final (remoção de métodos privados)
+  javadoc_runner.py          # Javadoc em métodos públicos
+  report_runner.py           # Relatório Markdown narrativo
 phases/
-  configs/              # 14 arquivos .yml — um por fase
-agent/                  # Loop agêntico (planner + executor)
-core/                   # Logger, utilitários, ExecutionLogger
-memory/                 # Cache de fases e métodos
-dashboard/              # data.py → dashboard_status.json (10s)
+  configs/                   # 14 arquivos .yml — um por fase
+skills/                      # 10 skills LLM (snippets de prompt em Markdown)
+  java-refactor-context/     # Base de toda chamada LLM em modo refator
+  java-tdd-unit-test/        # Geração de testes + Repair Strategy
+  java-repair-guide/         # Loop de correção do validator
+  java-guard-clauses/        # Fase 09
+  java-method-extraction/    # Fase 10
+  java-solid-dip/            # Fase 11
+  java-controller-lean/      # Fase 12
+  java-flow-refactor/        # Fase 13
+  java-dry-extraction/       # Fase 14
+  java-javadoc/              # Fase JAVADOC
+agent/                       # Loop agêntico (planner + executor; USE_AGENT_MODE)
+core/                        # Logger, utilitários, ExecutionLogger, live_state
+memory/                      # Cache de fases e métodos; SemanticMemory (opt-in)
+dashboard/                   # data.py → dashboard_status.json (10s)
 git_utils/
-  repo.py               # clone, branch, commit, push, _ensure_agent_gitignore
-logs/                   # execution.log, execution.jsonl, live_state.json (gitignored)
-repos/                  # Repositórios clonados (gitignored)
-dashboard.html          # Dashboard em tempo real
-report.html             # Visualizador do relatório de refatoração
-~/.claude/skills/
-  java-tdd-unit-test/
-  java-guard-clauses/
-  java-method-extraction/
-  java-solid-dip/
-  java-controller-lean/
-  java-flow-refactor/
-  java-dry-extraction/
-  java-javadoc/
+  repo.py                    # clone, branch, commit_and_push, commit_single_file (P2)
+tests/                       # Suite pytest — java/, ai/, agent/, memory/
+docs/
+  superpowers/plans/         # Planos de implementação versionados
+  images/                    # Screenshots do dashboard / relatório
+logs/                        # execution.log, execution.jsonl, live_state.json (gitignored)
+repos/                       # Repositórios alvo clonados (gitignored)
+Claude Code agents/          # Material de referência (1.437 .md) — NÃO integrado ao pipeline
+soul.md                      # Identidade do agente (EN) — injetada no topo de cada prompt
+config.py                    # OLLAMA_SEED, TIMEOUT, modelos, flags via .env
+main.py                      # Entry point — orquestra todas as fases
+dashboard.html               # Dashboard em tempo real
+report.html                  # Visualizador do relatório de refatoração
 ```
+
+> **Nota:** A pasta `Claude Code agents/` contém o pacote `everything-claude-code` — agentes/skills do ecossistema Claude Code (modelo `sonnet`, tool-use). Não é carregada pelo pipeline (que só usa `skills/` na raiz). Serve como referência para extrair padrões e adaptá-los em código Python ou nas skills locais.
 
 ---
 
