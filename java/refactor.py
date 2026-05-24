@@ -640,8 +640,10 @@ def _categorize_build_error(output: str, prod_imports: list | None = None) -> st
         )
 
     # Tipo incompatível no retorno do mock ou assertion
+    # E + Opção 2: incompatible-types numeric/big-number coercions
+    # Order matters — check more specific patterns first.
     if "incompatible types" in out:
-        # E: BigDecimal passado onde Long é esperado (ex: campo version)
+        # E (preserved): BigDecimal passado onde Long é esperado (ex: campo version)
         if "bigdecimal" in out and "long" in out:
             return (
                 "TYPE MISMATCH — Long field: You passed a BigDecimal where Long is required.\n"
@@ -652,6 +654,25 @@ def _categorize_build_error(output: str, prod_imports: list | None = None) -> st
                 "the parameter typed as 'Long' must receive a long integer, not a decimal.\n"
                 "Apply to ALL Long parameters in constructors and method calls."
             )
+
+        # Opção 2 (new): int/short/byte → Long literal (must add L suffix)
+        if re.search(r'incompatible types:\s*(int|short|byte)\s+cannot be converted to\s+(?:java\.lang\.)?Long', output, re.IGNORECASE):
+            return (
+                "TYPE CONVERSION ERROR: An int/short/byte literal cannot be auto-converted to Long.\n"
+                "  CORRECT: 1L  or  Long.valueOf(1)\n"
+                "  WRONG:   1   ← raw int — Java will NOT auto-widen to Long in this context\n"
+                "Find the int literal on the line indicated by the error and add the L suffix (e.g. 1 → 1L)."
+            )
+
+        # Opção 2 (new): int/double/short/byte/float → BigDecimal
+        if re.search(r'incompatible types:\s*(int|short|byte|double|float)\s+cannot be converted to\s+(?:java\.math\.)?BigDecimal', output, re.IGNORECASE):
+            return (
+                "TYPE CONVERSION ERROR: A numeric primitive cannot be auto-converted to BigDecimal.\n"
+                "  CORRECT: new BigDecimal(\"100.00\")  or  BigDecimal.valueOf(100)\n"
+                "  WRONG:   100      ← raw int/double — no implicit conversion\n"
+                "Find the literal on the line indicated by the error and wrap it in new BigDecimal(...) or BigDecimal.valueOf(...)."
+            )
+
         # A: String literal passado onde BigDecimal é esperado
         if "string" in out and "bigdecimal" in out:
             return (
@@ -661,6 +682,8 @@ def _categorize_build_error(output: str, prod_imports: list | None = None) -> st
                 "  CORRECT: someMethod(new BigDecimal(\"100.00\"))  /  new Foo(new BigDecimal(\"50.00\"))\n"
                 "Apply this fix to ALL BigDecimal parameters in constructors and method calls."
             )
+
+        # Generic fallback (preserved) — covers any other incompatible-types case
         for line in output.splitlines():
             if "incompatible types" in line.lower():
                 return (
