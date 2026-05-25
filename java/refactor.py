@@ -978,11 +978,50 @@ class FailedFilesTracker:
                 e for e in self._entries
                 if not (e["file"] == file_path and e["phase"] == phase and e.get("prev_run"))
             ]
+            # M7: enriched diagnostic log
+            haystack = (stack_trace or "") + " " + (reason or "")
+            try:
+                from java.fix_metadata import get_fixes
+                _fixes = get_fixes()
+            except Exception:
+                _fixes = []
+            compatible_fix_ids = [
+                f.get("id", "?")
+                for f in _fixes
+                if any(p in haystack for p in f.get("patterns", []))
+            ]
+            # First-failure timestamp: the earliest existing entry for this (file, phase)
+            same_key = [
+                e for e in self._entries
+                if e["file"] == file_path and e["phase"] == phase
+            ]
+            first_ts = min(
+                (e.get("timestamp", "") for e in same_key if e.get("timestamp")),
+                default=entry["timestamp"],
+            )
+            unmatched_patterns = [
+                p for p in _AUTO_EXPIRE_STACK_PATTERNS if p not in haystack
+            ]
+
             log(
                 f"  → {os.path.basename(file_path)}: SKIP PERMANENTE "
                 f"({entry['fail_count']} falhas consecutivas)",
                 "WARN",
             )
+            log(f"     · Motivo: {reason[:120]}", "WARN")
+            log(f"     · Primeira falha: {first_ts}", "WARN")
+            if compatible_fix_ids:
+                log(
+                    f"     · Fix candidates (fix_metadata): {', '.join(compatible_fix_ids)} "
+                    f"— considere FORCE_RETRY={os.path.basename(file_path)}",
+                    "INFO",
+                )
+            else:
+                log(
+                    f"     · Nenhum fix em fix_metadata.json cobre este padrão. "
+                    f"_AUTO_EXPIRE padrões não-aplicados: {unmatched_patterns[:3]}",
+                    "WARN",
+                )
         self._entries.append(entry)
         self._save()
         log(f"  → failed_files.json: {os.path.basename(file_path)}", "WARN")
