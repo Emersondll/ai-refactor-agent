@@ -2,8 +2,11 @@
 main.py — Localização: raiz do projeto (ai-refactor-agent/)
 """
 
+import argparse
+import datetime
 import os
 import subprocess
+import sys
 import threading
 import time
 from config import PHASES_DIR, REPOS_DIR, LOGS_DIR, USE_AGENT_MODE, BASE_DIR
@@ -13,13 +16,107 @@ from core.execution_logger import ExecutionLogger
 from git_utils.repo import clone_or_update, commit_and_push
 from memory.cache import Cache
 from memory.semantic_memory import SemanticMemory
-from java.refactor import generate_tests, get_java_files, get_failed_tracker
+from java.refactor import generate_tests, get_java_files, get_failed_tracker, FailedFilesTracker
+from java.fix_metadata import get_fixes
 from java.compiler import get_global_coverage, maven_test_with_coverage, maven_test
 from java.sanitizer import run_sanitization
 
 
+def _parse_cli_args() -> argparse.Namespace | None:
+    """Parse CLI args. Returns parsed args, or None if no CLI commands were given
+    (so main() proceeds to interactive mode)."""
+    parser = argparse.ArgumentParser(
+        description="AI Refactor Agent — manage permanent_skip entries via CLI",
+        add_help=True,
+    )
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--list-skips", action="store_true",
+        help="Print all permanent_skip entries (with age + applicable fix_metadata) and exit",
+    )
+    group.add_argument(
+        "--clear-skip", metavar="BASENAME",
+        help="Remove permanent_skip for files whose basename matches (e.g. FooTest.java)",
+    )
+    group.add_argument(
+        "--clear-all-skips", action="store_true",
+        help="Remove ALL permanent_skip entries and exit",
+    )
+    if len(sys.argv) <= 1:
+        return None
+    return parser.parse_args()
+
+
+def _cmd_list_skips() -> None:
+    tracker = FailedFilesTracker(LOGS_DIR)
+    fixes = get_fixes()
+    now = datetime.datetime.now()
+    permanent_entries = [e for e in tracker._entries if e.get("permanent_skip")]
+    if not permanent_entries:
+        print("No permanent_skip entries.")
+        return
+    print(f"{len(permanent_entries)} permanent_skip entries:\n")
+    print(f"{'BASENAME':<55} {'AGE':>10}  COMPATIBLE FIXES")
+    print("-" * 100)
+    for e in permanent_entries:
+        basename = e["file"].split("/")[-1]
+        ts_raw = e.get("timestamp", "")
+        try:
+            ts = datetime.datetime.fromisoformat(ts_raw)
+            age_days = (now - ts).days
+            age = f"{age_days}d"
+        except Exception:
+            age = "?"
+        haystack = (e.get("stack_trace") or "") + " " + (e.get("reason") or "")
+        compatible = []
+        for f in fixes:
+            try:
+                f_ts = datetime.datetime.fromisoformat(f.get("applied_at", ""))
+            except Exception:
+                continue
+            try:
+                if datetime.datetime.fromisoformat(ts_raw) >= f_ts:
+                    continue  # entry newer than fix — won't help
+            except Exception:
+                pass
+            if any(pat in haystack for pat in f.get("patterns", [])):
+                compatible.append(f.get("id", "?"))
+        compat_str = ",".join(compatible) if compatible else "(none)"
+        print(f"{basename:<55} {age:>10}  {compat_str}")
+    print()
+    print("Hint: use --clear-skip <basename> or set FORCE_RETRY in .env to retest a file.")
+
+
+def _cmd_clear_skip(basename: str) -> None:
+    tracker = FailedFilesTracker(LOGS_DIR)
+    matched = [e for e in tracker._entries if e.get("permanent_skip") and e["file"].split("/")[-1] == basename]
+    if not matched:
+        print(f"No permanent_skip entry for basename '{basename}'.")
+        return
+    total = 0
+    for e in matched:
+        total += tracker.clear_permanent_skips(e["file"])
+    print(f"Cleared {total} entry/entries for {basename}.")
+
+
+def _cmd_clear_all_skips() -> None:
+    tracker = FailedFilesTracker(LOGS_DIR)
+    n = tracker.clear_permanent_skips()
+    print(f"Cleared {n} permanent_skip entries.")
+
+
 def main():
     os.makedirs(LOGS_DIR, exist_ok=True)
+
+    _cli_args = _parse_cli_args()
+    if _cli_args is not None:
+        if _cli_args.list_skips:
+            _cmd_list_skips()
+        elif _cli_args.clear_skip:
+            _cmd_clear_skip(_cli_args.clear_skip)
+        elif _cli_args.clear_all_skips:
+            _cmd_clear_all_skips()
+        return  # exit without starting pipeline
 
     # B2: limpa estado ao vivo do run anterior antes de qualquer coisa
     from core.live_state import update as _live_reset
