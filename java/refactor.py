@@ -1831,6 +1831,80 @@ def _extract_private_method_names(code: str) -> list[str]:
     return names
 
 
+def _fix_private_method_calls(test_code: str, prod_code: str) -> str:
+    """Remove any @Test method in test_code that calls a private method of prod_code.
+
+    Uses word-boundary regex to avoid false positives (e.g., `validate` should NOT
+    match `validateAll`). Detection patterns:
+      - `.{name}(` — instance call like `obj.privateMethod(...)` or `Class.privateMethod(`
+      - `\\b{name}\\s*(` — bare call inside the test (rare; if the test extends the
+        target class, it could call inherited members, but private isn't inherited)
+
+    Returns the test_code with offending @Test methods removed. Other content
+    (imports, fields, lifecycle methods, public @Tests) is preserved unchanged.
+    """
+    private_names = _extract_private_method_names(prod_code)
+    if not private_names:
+        return test_code
+
+    # Build a regex that matches any call to one of the private names with word boundaries
+    name_alt = "|".join(re.escape(n) for n in private_names)
+    call_pattern = re.compile(rf'\.({name_alt})\s*\(|(?<![\w.])({name_alt})\s*\(')
+
+    # Walk through @Test method blocks. For each, check if any line matches.
+    lines = test_code.splitlines(keepends=True)
+    out_lines: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        # Look for @Test on a line (may be preceded by other annotations)
+        if re.match(r'^\s*@Test\b', line):
+            # Find the bounds of this @Test method:
+            # Start = current line (with annotations grouped)
+            # We need to find the opening { and matching } of the method body
+            ann_start = i
+            # Find the next { which opens the body
+            j = i
+            while j < len(lines) and "{" not in lines[j]:
+                j += 1
+            if j >= len(lines):
+                out_lines.append(line)
+                i += 1
+                continue
+            # Now find the matching } using brace depth from this point onward
+            brace_depth = 0
+            method_end = j
+            for k in range(j, len(lines)):
+                for ch in lines[k]:
+                    if ch == "{":
+                        brace_depth += 1
+                    elif ch == "}":
+                        brace_depth -= 1
+                        if brace_depth == 0:
+                            method_end = k
+                            break
+                if brace_depth == 0:
+                    break
+
+            method_block = "".join(lines[ann_start : method_end + 1])
+            if call_pattern.search(method_block):
+                # Skip the whole method block — drop these lines from output
+                # Also consume any trailing blank line for cleanliness
+                i = method_end + 1
+                if i < len(lines) and lines[i].strip() == "":
+                    i += 1
+                continue
+            else:
+                out_lines.extend(lines[ann_start : method_end + 1])
+                i = method_end + 1
+                continue
+
+        out_lines.append(line)
+        i += 1
+
+    return "".join(out_lines)
+
+
 def _build_active_rules(
     original: str,
     _prod_imports: list[str],
@@ -2227,6 +2301,7 @@ def generate_tests(repo_path: str, phase: str, rules: str,
         test_code = _auto_inject_missing_imports(test_code, _s1_imports, project_imports=_project_imports)
         # Fix F: corrige chamadas de construtor com número errado de argumentos (pre-Maven)
         test_code = _fix_constructor_calls(test_code, test_dep_context)
+        test_code = _fix_private_method_calls(test_code, original)
 
         os.makedirs(os.path.dirname(test_path), exist_ok=True)
         write_file(test_path, test_code)
@@ -2338,6 +2413,7 @@ def generate_tests(repo_path: str, phase: str, rules: str,
             corrected_test = _auto_inject_missing_imports(corrected_test, _s1_imports, project_imports=_project_imports)
             # Fix F: corrige chamadas de construtor com número errado de argumentos (pre-Maven)
             corrected_test = _fix_constructor_calls(corrected_test, test_dep_context)
+            corrected_test = _fix_private_method_calls(corrected_test, original)
             write_file(test_path, corrected_test)
             test_code = corrected_test
             success, combined_out, coverage, missed_lines = maven_test_with_coverage(repo_path, file_name)
