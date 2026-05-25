@@ -1050,6 +1050,24 @@ class FailedFilesTracker:
                 kept.append(e)
             # prev_run já contados são descartados
         self._entries = kept
+
+        # M3: also consult fix_metadata.json for auto-expire
+        try:
+            from java.fix_metadata import find_entries_to_expire
+            metadata_expire = set(find_entries_to_expire(self._entries))
+            if metadata_expire:
+                before = len(self._entries)
+                self._entries = [
+                    e for e in self._entries
+                    if e["file"] not in metadata_expire
+                    or not e.get("permanent_skip")
+                ]
+                removed = before - len(self._entries)
+                if removed:
+                    log(f"  → {removed} entries auto-expired via fix_metadata.json", "OK")
+        except Exception as exc:
+            log(f"  → fix_metadata check skipped: {exc}", "WARN")
+
         self._save()
 
     def clear_permanent_skips(self, file_path: str | None = None) -> int:
