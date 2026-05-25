@@ -37,6 +37,11 @@ FORCE_RETRY = [
     if s.strip()
 ]
 
+# M8: maximum age (in days) for a permanent_skip entry. Older entries are
+# auto-removed by FailedFilesTracker.reset() regardless of pattern matching.
+# Long-term safety net so nothing stays stuck forever.
+MAX_SKIP_AGE_DAYS = int(os.getenv("MAX_SKIP_AGE_DAYS", "30"))
+
 # ---------------------------------------------------------------------------
 # Performance Skills (all disabled by default — enable via .env)
 # ---------------------------------------------------------------------------

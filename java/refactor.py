@@ -1114,6 +1114,43 @@ class FailedFilesTracker:
         except Exception as exc:
             log(f"  → fix_metadata check skipped: {exc}", "WARN")
 
+        # M8: long-term safety net — auto-purge permanent_skip older than MAX_SKIP_AGE_DAYS.
+        # Disabled when MAX_SKIP_AGE_DAYS <= 0.
+        try:
+            from config import MAX_SKIP_AGE_DAYS as _MAX_AGE
+            if _MAX_AGE > 0:
+                from datetime import datetime as _dt, timedelta as _td
+                _cutoff = _dt.now() - _td(days=_MAX_AGE)
+                before = len(self._entries)
+                kept: list[dict] = []
+                for e in self._entries:
+                    if not e.get("permanent_skip"):
+                        kept.append(e)
+                        continue
+                    ts_raw = e.get("timestamp")
+                    if not ts_raw:
+                        kept.append(e)  # no timestamp → can't purge safely
+                        continue
+                    try:
+                        ts = _dt.fromisoformat(ts_raw)
+                    except Exception:
+                        kept.append(e)
+                        continue
+                    if ts < _cutoff:
+                        # Entry is older than the cutoff — purge
+                        continue
+                    kept.append(e)
+                self._entries = kept
+                removed = before - len(self._entries)
+                if removed:
+                    log(
+                        f"  → {removed} permanent_skip entries auto-purged "
+                        f"(>{_MAX_AGE} days old)",
+                        "OK",
+                    )
+        except Exception as exc:
+            log(f"  → M8 age-purge skipped: {exc}", "WARN")
+
         self._save()
 
     def clear_permanent_skips(self, file_path: str | None = None) -> int:
