@@ -401,7 +401,12 @@ def _fix_constructor_calls(test_code: str, dep_context: str) -> str:
     return "".join(out_parts)
 
 
-def _is_irrecoverable_hallucination(repair_hint: str, prod_imports: list[str]) -> bool:
+def _is_irrecoverable_hallucination(
+    repair_hint: str,
+    prod_imports: list[str],
+    test_code: str = "",
+    project_imports: dict[str, str] | None = None,
+) -> bool:
     """Return True when the repair hint indicates a hallucination that no retry
     can fix — the LLM referenced a method or class that does not exist anywhere
     findable, and no deterministic injector (S1, S2, P2 static import) can help.
@@ -455,6 +460,31 @@ def _is_irrecoverable_hallucination(repair_hint: str, prod_imports: list[str]) -
             return False
         # Long unique-looking method name (≥ 6 chars) not in the ubiquitous set → irrecoverable
         return True
+
+    # CASE C (Opção 9): PACKAGE ERROR + test_code scan for unknown class references.
+    # Only relevant when we have test_code to inspect.
+    if "PACKAGE ERROR" in repair_hint and test_code:
+        # Reuse the known-classes set used by IMPORT ERROR detection above
+        # (rebuild here to avoid coupling — small cost)
+        _known_local: set[str] = set(_JDK_IMPORT_MAP.keys())
+        for imp in prod_imports or []:
+            m = re.match(r'import\s+(?:static\s+)?([\w.]+)(?:\.\*)?;', imp)
+            if m:
+                _known_local.add(m.group(1).split(".")[-1])
+        _known_local.update({
+            "Test", "BeforeEach", "AfterEach", "BeforeAll", "AfterAll",
+            "Mock", "InjectMocks", "MockitoExtension", "ExtendWith",
+            "Assertions", "MockMvc", "ResponseEntity", "HttpStatus",
+            "MediaType", "HttpHeaders", "Mockito",
+        })
+        if project_imports:
+            _known_local.update(project_imports.keys())
+
+        # Find Class.MEMBER references — Class starts with uppercase, followed by .UPPER or .method
+        # Skip generic-like patterns by requiring the dot to be followed by an identifier (not <)
+        for cls in set(re.findall(r'\b([A-Z][A-Za-z0-9]+)\.\w', test_code)):
+            if cls not in _known_local:
+                return True
 
     # All other error categories (ASSERTION, TYPE MISMATCH, CONSTRUCTOR, RECORD, etc.) → recoverable
     return False
@@ -2148,7 +2178,11 @@ def generate_tests(repo_path: str, phase: str, rules: str,
 
             if not success:
                 repair_hint = _categorize_build_error(combined_out, _prod_imports)
-                if _is_irrecoverable_hallucination(repair_hint, _prod_imports):
+                if _is_irrecoverable_hallucination(
+                    repair_hint, _prod_imports,
+                    test_code=test_code,
+                    project_imports=_project_imports,
+                ):
                     log(
                         f"  [{test_name}] Falha irrecuperável detectada (alucinação de símbolo) — pulando reparos restantes",
                         "WARN",

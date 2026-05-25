@@ -97,3 +97,123 @@ def test_extracts_class_name_correctly():
     assert _is_irrecoverable_hallucination(
         repair_hint, ["import com.example.FooBarBaz;"]
     ) is False
+
+
+# ---------------------------------------------------------------------------
+# Opção 9: hallucination detection via test_code scan
+# ---------------------------------------------------------------------------
+
+
+def test_package_error_with_unknown_class_in_test_code_is_irrecoverable():
+    """LLM wrote `TotallyMadeUp.X` somewhere in test_code → PACKAGE ERROR.
+    The class is in no known map → irrecoverable."""
+    repair_hint = (
+        "PACKAGE ERROR: An import points to a package that does not exist.\n"
+        "Use only classes from the project — check the DEPENDENCY CONTEXT."
+    )
+    test_code = '''package x;
+import org.junit.jupiter.api.Test;
+class FooTest {
+    @Test
+    void t() {
+        var z = TotallyMadeUp.SOME_CONSTANT;
+    }
+}'''
+    assert _is_irrecoverable_hallucination(
+        repair_hint, prod_imports=[],
+        test_code=test_code, project_imports={},
+    ) is True
+
+
+def test_package_error_with_class_in_project_map_is_recoverable():
+    """LLM wrote TransactionStatusCode.X but it IS in project_imports.
+    S1 should have injected it next round → not irrecoverable."""
+    repair_hint = "PACKAGE ERROR: An import points to a package that does not exist."
+    test_code = "class T { void t() { var z = TransactionStatusCode.APPROVED; } }"
+    project_imports = {
+        "TransactionStatusCode": "import com.caju.enums.TransactionStatusCode;",
+    }
+    assert _is_irrecoverable_hallucination(
+        repair_hint, prod_imports=[],
+        test_code=test_code, project_imports=project_imports,
+    ) is False
+
+
+def test_package_error_with_known_jdk_class_is_recoverable():
+    """LLM wrote BigDecimal.ZERO — JDK map has BigDecimal → S1 injects → recoverable."""
+    repair_hint = "PACKAGE ERROR: An import points to a package that does not exist."
+    test_code = "class T { void t() { var z = BigDecimal.ZERO; } }"
+    assert _is_irrecoverable_hallucination(
+        repair_hint, prod_imports=[],
+        test_code=test_code, project_imports={},
+    ) is False
+
+
+def test_package_error_without_test_code_falls_through():
+    """If test_code is not passed, function uses old logic (no scan) — defensive default."""
+    repair_hint = "PACKAGE ERROR: An import points to a package that does not exist."
+    # Without test_code, can't scan — return False (don't fail-fast on uncertainty)
+    result = _is_irrecoverable_hallucination(repair_hint, prod_imports=[])
+    # Conservative: with no test_code, we cannot detect hallucination → False (recoverable)
+    assert result is False
+
+
+def test_known_spring_class_in_test_code_is_recoverable():
+    """Spring framework classes like HttpStatus, ResponseEntity, MediaType
+    are common and should NOT be flagged as hallucinations."""
+    repair_hint = "PACKAGE ERROR: An import points to a package that does not exist."
+    test_code = '''class T {
+        void t() {
+            assertEquals(HttpStatus.OK, ResponseEntity.ok().getStatusCode());
+        }
+    }'''
+    assert _is_irrecoverable_hallucination(
+        repair_hint, prod_imports=[],
+        test_code=test_code, project_imports={},
+    ) is False
+
+
+def test_constants_lowercase_after_class_dot_not_flagged():
+    """Field access like `x.field` (lowercase after dot) is NOT a class.MEMBER pattern."""
+    repair_hint = "PACKAGE ERROR: An import points to a package that does not exist."
+    test_code = "class T { void t() { var z = someVar.method(); } }"
+    # someVar is lowercase — not a class reference — and even if scanned, no unknown class
+    assert _is_irrecoverable_hallucination(
+        repair_hint, prod_imports=[],
+        test_code=test_code, project_imports={},
+    ) is False
+
+
+def test_multiple_classes_one_unknown_is_irrecoverable():
+    """Only one unknown class is enough to flag as irrecoverable."""
+    repair_hint = "PACKAGE ERROR: An import points to a package that does not exist."
+    test_code = '''class T {
+        void t() {
+            var ok1 = HttpStatus.OK;
+            var ok2 = BigDecimal.ZERO;
+            var bad = SomeRandomHallucination.NOPE;
+        }
+    }'''
+    assert _is_irrecoverable_hallucination(
+        repair_hint, prod_imports=[],
+        test_code=test_code, project_imports={},
+    ) is True
+
+
+def test_existing_method_error_still_irrecoverable():
+    """Pre-existing METHOD ERROR detection still works (regression check)."""
+    repair_hint = (
+        "METHOD ERROR: You called 'method getMadeUpThing()' which DOES NOT EXIST"
+    )
+    # Without test_code, falls back to old logic
+    assert _is_irrecoverable_hallucination(repair_hint, prod_imports=[]) is True
+
+
+def test_assertion_error_is_recoverable_regardless():
+    """ASSERTION errors are never irrecoverable — even with hallucinated class names."""
+    repair_hint = "ASSERTION WRONG EXPECTED VALUE: expected: <5> but was: <50>"
+    test_code = "class T { void t() { TotallyMadeUp.X = 1; } }"
+    assert _is_irrecoverable_hallucination(
+        repair_hint, prod_imports=[],
+        test_code=test_code, project_imports={},
+    ) is False
