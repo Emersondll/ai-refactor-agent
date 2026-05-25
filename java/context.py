@@ -100,12 +100,14 @@ def _find_class_file(class_name: str, repo_path: str) -> str | None:
     return None
 
 
-def _extract_simplified_header(code: str, full_name: str) -> str:
+def _extract_simplified_header(code: str, full_name: str = "") -> str:
     """
-    Extrai assinaturas de métodos públicos/protegidos.
+    Extrai assinaturas de métodos públicos/protegidos/package-private.
     Para enums, preserva os valores declarados para evitar alucinação do LLM.
     Para records, injeta CONSTRUCTOR CALL com nomes reais dos parâmetros.
-    Remove: campos privados, comentários, imports, corpos de métodos.
+    Remove: membros private (métodos e campos), comentários, imports, corpos de métodos.
+    Mantém: public, protected, package-private (sem modificador) — acessíveis de testes
+    no mesmo pacote.
     """
     is_enum = bool(re.search(r'\benum\b', code))
     is_record = bool(re.search(r'\brecord\b', code))
@@ -218,12 +220,25 @@ def _extract_simplified_header(code: str, full_name: str) -> str:
             if not stripped.startswith(('/', '*', '@')):
                 in_enum_constants = False
 
-        # Apenas membros públicos/protegidos com parênteses (métodos)
-        if ('public ' in stripped or 'protected ' in stripped) and '(' in stripped:
-            signature = stripped.split('{')[0].strip()
-            if not signature.endswith(';'):
-                signature += ";"
-            header_lines.append("    " + signature)
+        # Membros com parênteses (métodos): público, protegido e package-private.
+        # Filtrar membros private (incluindo private static, private final, etc.)
+        if re.match(r'private\b', stripped):
+            continue
+        if '(' in stripped:
+            # Excluir linhas que são chamadas de método ou anotações, não declarações
+            # Uma declaração de método começa com modificador ou tipo de retorno seguido por nome(
+            # Incluir: public/protected/package-private methods
+            # Excluir linhas que não são declarações de método (ex.: chamadas dentro de corpo)
+            is_method_decl = bool(re.match(
+                r'(?:(?:public|protected|static|abstract|synchronized|final|default)\s+)*'
+                r'(?:[\w<>\[\]]+\s+)+\w+\s*\(',
+                stripped
+            ))
+            if is_method_decl:
+                signature = stripped.split('{')[0].strip()
+                if not signature.endswith(';'):
+                    signature += ";"
+                header_lines.append("    " + signature)
 
     if constructor_hint:
         header_lines.append(constructor_hint)
