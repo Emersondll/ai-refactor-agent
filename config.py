@@ -28,6 +28,15 @@ TIMEOUT_TEST = 420   # geração de testes — 7 min por chamada; cobre ~50s KV 
 MAX_RETRIES  = 2
 OLLAMA_SEED  = int(os.getenv("OLLAMA_SEED", "42"))  # fixed seed → reproducible generation run-to-run
 
+# M4: comma-separated list of test file basenames to force-retry even if they
+# are in failed_files.json as permanent_skip. Useful when a recent fix should
+# unblock specific files. Example: FORCE_RETRY=TransactionControllerTest.java,FooTest.java
+FORCE_RETRY = [
+    s.strip()
+    for s in os.getenv("FORCE_RETRY", "").split(",")
+    if s.strip()
+]
+
 # ---------------------------------------------------------------------------
 # Performance Skills (all disabled by default — enable via .env)
 # ---------------------------------------------------------------------------

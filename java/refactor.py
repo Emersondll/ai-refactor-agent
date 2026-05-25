@@ -997,7 +997,14 @@ class FailedFilesTracker:
         )
 
     def is_permanent_skip(self, file_path: str, phase: str) -> bool:
-        """Retorna True se este arquivo deve ser pulado permanentemente."""
+        """Retorna True se este arquivo deve ser pulado permanentemente.
+
+        Honors FORCE_RETRY from .env — files whose basename appears in the list
+        are NOT skipped, even if marked permanent_skip in failed_files.json.
+        """
+        from config import FORCE_RETRY as _FORCE_RETRY
+        if os.path.basename(file_path) in _FORCE_RETRY:
+            return False
         return any(
             e.get("permanent_skip")
             for e in self._entries
