@@ -319,22 +319,30 @@ python3 -m http.server 8000
 - **P3 — Slim active_rules**: helper `_build_active_rules()` consolidou 12+ blocos `### MANDATORY` (IMPORTS PRESENT + SELF-IMPORT + IMPORT PROHIBITION → único `### IMPORTS`; condicionais compactados a ≤4 linhas; mandatoriedade declarada uma vez). Regression test verifica 18 frases-chave preservadas
 - **P4 — Surgical Python Patch**: `_try_surgical_patch()` aplica patch de uma linha para asserções determinísticas (`assertNull`↔`assertEquals` + value swap) ANTES de `call_ai_with_correction`. Janela ±3 linhas para off-by-N do Maven. Elimina regeneração de arquivo inteiro para erros conhecidos
 - **S4 — assertNull Mirror Handler**: handler em `_categorize_build_error` para `expected: <null> but was: <X>` quando X é valor real não-null (espelho do S1) — retorna instrução de substituir `assertNull(expr)` por `assertEquals("X", expr)`. Regra preventiva `### SETTER/GETTER TEST PATTERN` no `active_rules` quando classe tem construtor com parâmetros
+- **Opção 1 — Pro-active Constructor Validator**: `_fix_constructor_calls(test_code, dep_context)` parseia `// CONSTRUCTOR CALL: new X(Type1 p1, ...)` do dep_context e, para cada `new X(args)` no código gerado cuja contagem não bate com a assinatura canônica, reescreve com sample values da tabela tipo→literal (String→`"sampleA"`, BigDecimal→`new BigDecimal("100.00")`, Long→`1L`, Timestamp SQL format, etc.). Splitter de args respeita parens balanceadas + generics + strings. Hookado em ambos os call sites de `generate_tests` (geração inicial + repair) após `_auto_inject_missing_imports`, antes de `write_file`. Pré-Maven — catches o erro de compile mais frequente (record/class constructor mismatch) sem queimar 3 tentativas de reparo. Postura defensiva: se algum tipo requerido não está na tabela, deixa a chamada intacta
+- **Opção 2 — int/double→Long/BigDecimal Handler (Fix E2)**: estende a branch `incompatible types` de `_categorize_build_error` com dois casos antes do fallback genérico — `int|short|byte → Long` retorna instrução de adicionar sufixo `L` (1 → 1L); `int|double|short|byte|float → BigDecimal` retorna instrução de envolver em `new BigDecimal("...")` ou `BigDecimal.valueOf(...)`. Handler E original (BigDecimal→Long) preservado intacto. Sem este fix, esses erros caíam no handler-fantasma que falava de `ResponseEntity` — completamente irrelevante e enganoso
+- **Opção 5 — Fail-Fast em Alucinação Irrecuperável**: `_is_irrecoverable_hallucination(repair_hint, prod_imports)` inspeciona o retorno de `_categorize_build_error`. Retorna `True` quando (a) `IMPORT ERROR` nomeia classe ausente de `_prod_imports` + `_JDK_IMPORT_MAP` + JUnit/Mockito/Spring conhecidos (e não é STATIC IMPORT que P2 corrige), OU (b) `METHOD ERROR` nomeia método que NÃO está no allowlist `_UBIQUITOUS_METHOD_NAMES` (distingue `getName`/`getValue` recuperáveis de `getCode`/`getFooBar` irrecuperáveis). Hookado logo após `_categorize_build_error` no repair loop: se `True`, `break` sai do loop antes de queimar 3 tentativas × ~5min. Economiza ~50–70% do tempo em arquivos condenados
+- **Opção 6 — Project-Wide Import Map**: `build_project_imports(repo_path)` varre `src/main/java/` uma vez por run, mapeia `{ShortName: "import full.pkg.ShortName;"}` para toda classe/enum/interface/record `public`. `_auto_inject_missing_imports` (S1) ganhou parâmetro opcional `project_imports` consultado como fallback após `prod_map` e `_JDK_IMPORT_MAP`. Quando o LLM escreve `TransactionStatusCode.APPROVED` no teste de um controller que não importa a enum, S1 agora injeta `import com.caju.transactionauthorizer.enums.TransactionStatusCode;` deterministicamente — sem Maven failure, sem repair loop. Política de colisão de nomes curtos: last-seen wins (aceitável para este codebase onde short names são únicos)
+- **Opção 8 — Enum Support em P0**: `_extract_enum_constants(dep_context, enum_name)` parseia bloco `public enum X { ... }` do dep_context (lida com constantes simples e com constructor args como `APPROVED("00")`). `generate_data_holder_test` aceita parâmetro `dep_context` — quando um tipo de campo do construtor não está em `_TYPE_SAMPLES`, tenta resolver via enum e usa a primeira constante como sample value (`CategoryCodeName.FOOD`). Import do enum extraído dos imports da classe de produção. Safe-fail: sem dep_context ou enum não encontrado → retorna `None` (fallback LLM como antes). Desbloqueia data holders com campos enum (ex: `MerchantCategoryCodesDocument` com `CategoryCodeName`) — agora geram via caminho determinístico em vez de cair no LLM com alucinações de Mockito
+- **Opção 9 — Hallucination Detection via test_code Scan**: `_is_irrecoverable_hallucination` ganhou parâmetros opcionais `test_code` e `project_imports`. Quando `repair_hint` contém `PACKAGE ERROR` E `test_code` é passado, scan por `[A-Z]\w+\.MEMBER` — qualquer classe referenciada que NÃO esteja em `{prod_imports, _JDK_IMPORT_MAP, project_imports, common JUnit/Mockito/Spring}` é alucinação irrecuperável → break do repair loop em 1 tentativa em vez de 3. Complementa Opção 6: se 6 não conseguiu injetar porque a classe não existe em mapa algum, 9 impede que o LLM invente variações por 3 tentativas
 
 ---
 
 ## Hierarquia de Modelos
 
-| Papel | Tamanho | Responsabilidade |
-|-------|---------|-----------------|
-| Ultimate | 14B+ | SOLID, arquitetura, revisão crítica |
-| Advanced | 9B | Clean code, lógica de negócio, testes |
-| Standard | 7B | Estrutura, nomenclatura |
-| Light | 4B | Javadoc, `final`, formatação |
+| Papel | Modelo padrão | Tamanho | Responsabilidade |
+|-------|--------------|---------|-----------------|
+| Ultimate (SOLID) | `qwen2.5-coder:14b` | 9.0 GB | SOLID, arquitetura, revisão crítica |
+| Advanced (Clean) | `qwen2.5-coder:14b` | (mesmo) | Clean code, lógica de negócio, **testes** (era `gemma4:latest`) |
+| Recovery | `qwen2.5-coder:14b` | (mesmo) | Repair loop — code-aware, code-specialized |
+| Standard (Struct) | `qwen2.5-coder:7b` | 4.7 GB | Estrutura, nomenclatura, revisão de diff, planner |
+| Light (Doc) | `qwen2.5-coder:7b` | (mesmo) | **Javadoc** (era `neural-chat:7b` — code-aware previne mudança de estrutura) |
+
+> Apenas **2 modelos físicos** ocupam RAM: `qwen2.5-coder:7b` (Standard/Light) e `qwen2.5-coder:14b` (Ultimate/Advanced/Recovery). Todos overridable via `.env`.
 
 ```bash
-ollama pull qwen2.5-coder:14b   # Ultimate
-ollama pull gemma4:latest        # Advanced
-ollama pull qwen2.5-coder:7b    # Standard
+ollama pull qwen2.5-coder:14b   # Ultimate / Advanced / Recovery
+ollama pull qwen2.5-coder:7b    # Standard / Light
 ```
 
 ---
