@@ -2010,7 +2010,10 @@ def generate_tests(repo_path: str, phase: str, rules: str,
         if not complement_mode:
             from java.data_holder_test_gen import is_pure_data_holder, generate_data_holder_test
             if is_pure_data_holder(original):
-                _dh_test = generate_data_holder_test(original, test_name.replace(".java", ""), _test_pkg)
+                _dh_test = generate_data_holder_test(
+                    original, test_name.replace(".java", ""), _test_pkg,
+                    dep_context=test_dep_context,
+                )
                 if _dh_test:
                     os.makedirs(os.path.dirname(test_path), exist_ok=True)
                     write_file(test_path, _dh_test)

@@ -32,6 +32,42 @@ _SUPPORTED_TYPES: dict[str, tuple[Optional[str], str, str]] = {
 
 
 # ---------------------------------------------------------------------------
+# Enum constant extractor
+# ---------------------------------------------------------------------------
+
+def _extract_enum_constants(dep_context: str, enum_name: str) -> list[str]:
+    """Parse a `public enum <enum_name> { ... }` block from dep_context and return
+    the list of constant names (in declaration order). Empty list if not found.
+
+    Handles both bare constants (`RED, GREEN`) and constructor-arg constants
+    (`APPROVED("00"), INSUFFICIENT_FUNDS("51")`).
+    """
+    if not dep_context or not enum_name:
+        return []
+    # Match `enum <Name> { body }` — body extends to the next `}` at depth 0
+    pattern = re.compile(
+        r'\benum\s+' + re.escape(enum_name) + r'\s*\{([^}]*)\}',
+        re.DOTALL,
+    )
+    m = pattern.search(dep_context)
+    if not m:
+        return []
+    body = m.group(1)
+    # Stop at the first `;` (separates constants from methods/fields in an enum body)
+    body = body.split(";", 1)[0]
+    constants: list[str] = []
+    for raw in body.split(","):
+        token = raw.strip()
+        if not token:
+            continue
+        # Strip constructor args: `APPROVED("00")` → `APPROVED`
+        const_m = re.match(r'^([A-Z][A-Z0-9_]*)\s*(?:\(.*?\))?', token, re.DOTALL)
+        if const_m:
+            constants.append(const_m.group(1))
+    return constants
+
+
+# ---------------------------------------------------------------------------
 # Regexes auxiliares
 # ---------------------------------------------------------------------------
 
@@ -190,6 +226,7 @@ def generate_data_holder_test(
     code: str,
     test_class_name: str,
     test_package: str,
+    dep_context: str = "",
 ) -> Optional[str]:
     """
     Gera o código-fonte Java completo de um teste JUnit 5 para a classe data-holder
@@ -249,10 +286,26 @@ def generate_data_holder_test(
     if not ctor_params:
         return None  # somente construtor no-arg → não testável de forma útil
 
-    # --- Valida que todos os tipos são suportados
+    # --- Resolve enum types from dep_context; build enum_samples map
+    # For each type not in _SUPPORTED_TYPES, try to resolve via dep_context enum
+    _enum_samples: dict[str, tuple[Optional[str], str, str]] = {}  # type → (import, sampleA, sampleB)
+    _import_re = re.compile(r'^\s*import\s+([\w.]+\.' + r'(?:{type})' + r')\s*;', re.MULTILINE)
     for ptype, _ in ctor_params:
-        if ptype not in _SUPPORTED_TYPES:
-            return None
+        if ptype in _SUPPORTED_TYPES:
+            continue
+        # Try to resolve as an enum from dep_context
+        constants = _extract_enum_constants(dep_context, ptype)
+        if not constants:
+            return None  # unsupported type, no enum resolution → LLM fallback
+        first_const = constants[0]
+        sample_val = f"{ptype}.{first_const}"
+        # Extract the import line from the production code
+        import_pattern = re.compile(r'^\s*import\s+([\w.]+\.' + re.escape(ptype) + r')\s*;', re.MULTILINE)
+        imp_m = import_pattern.search(code)
+        if not imp_m:
+            return None  # cannot find import for this enum type → safe-fail
+        enum_import = f"import {imp_m.group(1)};"
+        _enum_samples[ptype] = (enum_import, sample_val, sample_val)
 
     # --- Monta mapa de getters: field_name_lower → getter_method_name
     getter_map: dict[str, str] = {}
@@ -277,10 +330,16 @@ def generate_data_holder_test(
         if pname.lower() not in getter_map:
             return None
 
+    # --- Helper to get type info from either _SUPPORTED_TYPES or _enum_samples
+    def _type_info(ptype: str) -> tuple[Optional[str], str, str]:
+        if ptype in _SUPPORTED_TYPES:
+            return _SUPPORTED_TYPES[ptype]
+        return _enum_samples[ptype]
+
     # --- Coleta imports necessários
     needed_imports: set[str] = set()
     for ptype, _ in ctor_params:
-        imp, _, _ = _SUPPORTED_TYPES[ptype]
+        imp, _, _ = _type_info(ptype)
         if imp:
             needed_imports.add(imp)
 
@@ -288,7 +347,7 @@ def generate_data_holder_test(
     for ptype, pname in ctor_params:
         pname_lower = pname.lower()
         if pname_lower in setter_map:
-            imp, _, _ = _SUPPORTED_TYPES[ptype]
+            imp, _, _ = _type_info(ptype)
             if imp:
                 needed_imports.add(imp)
 
@@ -302,7 +361,7 @@ def generate_data_holder_test(
     sample_a: dict[str, str] = {}
     sample_b: dict[str, str] = {}
     for ptype, pname in ctor_params:
-        _, sa, sb = _SUPPORTED_TYPES[ptype]
+        _, sa, sb = _type_info(ptype)
         sample_a[pname] = sa
         sample_b[pname] = sb
 
