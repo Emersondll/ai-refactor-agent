@@ -1815,6 +1815,22 @@ def _extract_test_setup(existing_test: str) -> str:
 # Geração de testes
 # ---------------------------------------------------------------------------
 
+def _extract_private_method_names(code: str) -> list[str]:
+    """Return the names of all private methods declared in the class source."""
+    pattern = re.compile(
+        r'^\s*private\s+(?:static\s+|final\s+|synchronized\s+)*'
+        r'[\w<>\[\],?\s]+\s+(\w+)\s*\(',
+        re.MULTILINE,
+    )
+    names: list[str] = []
+    for m in pattern.finditer(code):
+        name = m.group(1)
+        # Skip if the captured name is a Java keyword (defensive — should not happen)
+        if name not in names:
+            names.append(name)
+    return names
+
+
 def _build_active_rules(
     original: str,
     _prod_imports: list[str],
@@ -1949,6 +1965,19 @@ def _build_active_rules(
         "NEVER assertEquals(EnumValue, result.getField()) when input was null.\n"
         "NEVER invent a non-null expected value unless the production code explicitly defines a non-null default.\n"
     )
+
+    # M12: private method prohibition — prevents `has private access` compile errors
+    _private_methods = _extract_private_method_names(original)
+    if _private_methods:
+        active_rules += (
+            "\n\n### PRIVATE METHODS — NEVER CALL\n"
+            "The class under test declares these PRIVATE methods. They cannot be called "
+            "from a test in any package (Java enforcement):\n"
+            f"  {', '.join(_private_methods)}\n"
+            "If you need to verify the behavior of any of these, find the PUBLIC method "
+            "in the same class that invokes the private one internally and call that "
+            "public method instead — the private logic runs as a side effect."
+        )
 
     return active_rules
 
