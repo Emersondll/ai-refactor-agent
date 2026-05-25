@@ -11,6 +11,7 @@ ENV/
 
 # Logs and runtime data
 logs/
+!logs/fix_metadata.json
 *.log
 last_run.txt
 failed_files.json
