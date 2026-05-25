@@ -506,6 +506,27 @@ def _categorize_build_error(output: str, prod_imports: list | None = None) -> st
             "ONE CHANGE ONLY — do NOT modify any other code. Do NOT change assertions, imports, or class structure.\n"
         )
 
+    # M1: método ou campo privado chamado de fora — LLM violou encapsulamento.
+    # Maven: "<member>(<types>) has private access in <FQN>"
+    if "has private access" in out:
+        # Extract member name (works for methods and fields)
+        m = re.search(r'(\w+)\s*\([^)]*\)\s*has private access', output)
+        if m:
+            member = m.group(1) + "()"
+        else:
+            m = re.search(r'(\w+)\s+has private access', output)
+            member = m.group(1) if m else "the called member"
+        return (
+            f"PRIVATE METHOD ACCESS ERROR: Your test called `{member}` directly, "
+            f"but it is declared `private` in the source class.\n"
+            "RULE: tests can only call `public`, `protected`, or package-private members.\n"
+            f"FIX: REMOVE the call to `{member}` from the test. If you need to verify the "
+            "behavior of the private method, find the PUBLIC method in the source class "
+            "that invokes it internally and call THAT public method — the private logic "
+            "will execute as part of the public call's side effects.\n"
+            "Look in DEPENDENCY CONTEXT for public method signatures of this class."
+        )
+
     # Erro de construtor de record (detectar ANTES de cannot find symbol)
     if "constructor" in out and "in record" in out and "cannot be applied" in out:
         for line in output.splitlines():
