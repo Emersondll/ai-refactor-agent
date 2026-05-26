@@ -438,8 +438,10 @@ def call_ai_with_correction(original: str, rules: str, mode: str,
         log("  [Autocura] Claude indisponível ou falhou.", "WARN")
 
     log(f"  [Autocura] Acionando Médico Local (Second Opinion) com {MODEL_RECOVERY}...", "WARN")
+    call_timeout = TIMEOUT_TEST if mode == "test" else TIMEOUT
     recovery_result = _try_local_agent("recovery", MODEL_RECOVERY, correction_prompt,
-                                       temperature=0.1, num_predict=call_num_predict)
+                                       temperature=0.1, timeout=call_timeout,
+                                       num_predict=call_num_predict)
 
     if recovery_result:
         return recovery_result
