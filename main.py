@@ -146,6 +146,24 @@ def main():
             except: pass
             time.sleep(10) # Atualiza o JSON a cada 10s
 
+    # M15: warn about recent `fix:` commits not registered in fix_metadata.json
+    try:
+        from core.fix_metadata_audit import audit_fix_metadata
+        _missing = audit_fix_metadata()
+        if _missing:
+            log(
+                f"[fix_metadata] {len(_missing)} commit(s) `fix:` recente(s) "
+                f"sem entrada em logs/fix_metadata.json: {', '.join(_missing[:10])}",
+                "WARN",
+            )
+            log(
+                "[fix_metadata] Considere `register_fix(...)` para que M3 "
+                "(auto-expire) consiga aplicar.",
+                "INFO",
+            )
+    except Exception:
+        pass  # never break boot over an audit
+
     repo = input("Repo URL ou caminho local: ").strip()
     if not repo:
         log("Nenhum repositório informado.", "ERR")
