@@ -2453,11 +2453,15 @@ def generate_tests(repo_path: str, phase: str, rules: str,
             reporter.record_skipped(phase, test_name, reason)
             continue
 
-        # S1: injeta imports ausentes antes de gravar no disco (inclui self-import via _s1_imports)
-        test_code = _auto_inject_missing_imports(test_code, _s1_imports, project_imports=_project_imports)
-        # Fix F: corrige chamadas de construtor com número errado de argumentos (pre-Maven)
+        # Ordem dos validators pré-write:
+        # 1) _fix_constructor_calls: pode INTRODUZIR new BigDecimal(...) / Timestamp.valueOf(...)
+        #    quando reescreve construtor com sample values da tabela _TYPE_SAMPLES.
+        # 2) _fix_private_method_calls: só remove @Tests inválidos, não adiciona tipos novos.
+        # 3) _auto_inject_missing_imports (S1) DEVE rodar POR ÚLTIMO para enxergar
+        #    todos os tipos introduzidos pelas etapas anteriores e injetar os imports.
         test_code = _fix_constructor_calls(test_code, test_dep_context)
         test_code = _fix_private_method_calls(test_code, original)
+        test_code = _auto_inject_missing_imports(test_code, _s1_imports, project_imports=_project_imports)
 
         os.makedirs(os.path.dirname(test_path), exist_ok=True)
         write_file(test_path, test_code)
@@ -2565,11 +2569,13 @@ def generate_tests(repo_path: str, phase: str, rules: str,
                 success = False
                 continue  # não escreve o arquivo — força novo reparo com erro de package
 
-            # S1: injeta imports ausentes no código corrigido antes de gravar (inclui self-import)
-            corrected_test = _auto_inject_missing_imports(corrected_test, _s1_imports, project_imports=_project_imports)
-            # Fix F: corrige chamadas de construtor com número errado de argumentos (pre-Maven)
+            # Ordem dos validators pré-write (mesma do bloco de geração inicial):
+            # _fix_constructor_calls pode INTRODUZIR new BigDecimal/Timestamp/Long,
+            # então S1 (_auto_inject_missing_imports) precisa rodar POR ÚLTIMO para
+            # injetar os imports dos tipos recém-introduzidos.
             corrected_test = _fix_constructor_calls(corrected_test, test_dep_context)
             corrected_test = _fix_private_method_calls(corrected_test, original)
+            corrected_test = _auto_inject_missing_imports(corrected_test, _s1_imports, project_imports=_project_imports)
             write_file(test_path, corrected_test)
             test_code = corrected_test
             success, combined_out, coverage, missed_lines = maven_test_with_coverage(repo_path, file_name)
