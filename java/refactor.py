@@ -688,6 +688,29 @@ def _categorize_build_error(output: str, prod_imports: list | None = None) -> st
                             "  ONE LINE CHANGE — nothing else."
                         )
 
+                    # N5: HTTP status mismatch — Maven format <NNN NAME> on both sides.
+                    # Must fire BEFORE G1 general so HTTP pairs get the ResponseEntity context.
+                    _http_pattern = re.search(
+                        r'expected:\s*<(\d{3})\s+(\w+)>\s*but was:\s*<(\d{3})\s+(\w+)>',
+                        detail,
+                    )
+                    if _http_pattern:
+                        exp_code, exp_name = _http_pattern.group(1), _http_pattern.group(2)
+                        act_code, act_name = _http_pattern.group(3), _http_pattern.group(4)
+                        return (
+                            f"HTTP STATUS MISMATCH:\n"
+                            f"  Your test expects: <{exp_code} {exp_name}>\n"
+                            f"  Actual response:   <{act_code} {act_name}>\n\n"
+                            "ROOT CAUSE: When a Spring controller returns ResponseEntity, "
+                            "Spring IGNORES @ResponseStatus — the actual status comes from "
+                            "the ResponseEntity call itself (e.g. .ok() → 200, .status(N) → N).\n\n"
+                            "SURGICAL FIX — change ONLY the failing assertion:\n"
+                            f"  REPLACE: assertEquals(HttpStatus.{exp_name}, response.getStatusCode())\n"
+                            f"  WITH:    assertEquals(HttpStatus.{act_name}, response.getStatusCode())\n"
+                            "If you used .value() or raw int, swap "
+                            f"{exp_code} for {act_code}. ONE LINE CHANGE — no other code modifications."
+                        )
+
                     # S1: actual é null — instrução específica para assertNull()
                     # Evita ambiguidade: LLM não deve usar assertEquals("null", ...) nem assertEquals(null, ...)
                     if _actual_from_code == "null":
