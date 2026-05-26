@@ -2278,6 +2278,9 @@ def generate_tests(repo_path: str, phase: str, rules: str,
     _project_imports = build_project_imports(repo_path)
 
     for main_file in main_files:
+        # N9: reseta contador de timeouts consecutivos para cada arquivo novo
+        from ai.model import reset_consecutive_timeouts as _reset_ct
+        _reset_ct()
         original  = read_file(main_file)
         file_name = os.path.basename(main_file)
 

@@ -28,6 +28,28 @@ _OOM_SIGNALS = ("model requires more system", "not enough memory", "out of memor
 MAX_CORRECTIONS = 1
 _last_successful_model: str = ""  # updated on every successful call_ai
 
+# N9: contador de timeouts consecutivos POR ARQUIVO. Cada call_model timeout
+# incrementa; sucesso reseta. _try_local_agent aborta antecipadamente quando
+# atinge _TIMEOUT_ABORT_THRESHOLD para evitar cascata de timeouts inúteis.
+# generate_tests deve chamar reset_consecutive_timeouts() ao iniciar cada arquivo.
+_consecutive_timeouts: int = 0
+_TIMEOUT_ABORT_THRESHOLD: int = 2
+
+
+def get_consecutive_timeouts() -> int:
+    return _consecutive_timeouts
+
+
+def reset_consecutive_timeouts() -> None:
+    global _consecutive_timeouts
+    _consecutive_timeouts = 0
+
+
+def _set_consecutive_timeouts_for_test(value: int) -> None:
+    """Apenas para testes — NÃO usar em produção."""
+    global _consecutive_timeouts
+    _consecutive_timeouts = value
+
 
 def get_last_model() -> str:
     return _last_successful_model
@@ -83,6 +105,7 @@ def call_model(model: str, prompt: str, temperature: float = 0.7,
     """
     Chama o Ollama via API HTTP para melhor controle e performance.
     """
+    global _consecutive_timeouts  # N9: declared once at function top per Python rules
     url = "http://localhost:11434/api/generate"
     payload = {
         "model": model,
@@ -103,12 +126,15 @@ def call_model(model: str, prompt: str, temperature: float = 0.7,
             if _is_oom_error(err_msg):
                 return None, True
             return None, False
-            
+
         data = response.json()
+        # N9: reset counter on any successful (non-timeout) response
+        _consecutive_timeouts = 0
         return data.get("response"), False
 
     except requests.exceptions.Timeout:
         log(f"[{model}] timeout na API após {_timeout}s", "WARN")
+        _consecutive_timeouts += 1
         return None, False
     except Exception as e:
         if _is_oom_error(str(e)):
@@ -225,6 +251,13 @@ def _try_local_agent(agent: str, model_name: str, prompt: str, temperature: floa
     last_error  = None
 
     for attempt in range(1, MAX_RETRIES + 1):
+        # N9: aborta cascata se já houve threshold de timeouts no mesmo arquivo
+        if _consecutive_timeouts >= _TIMEOUT_ABORT_THRESHOLD:
+            log(
+                f"  [{model_name}] abortando: {_consecutive_timeouts} timeouts "
+                f"consecutivos no arquivo — economizando wall-clock", "WARN",
+            )
+            return None
         current_prompt = prompt
         if attempt > 1 and last_output and last_error:
             log(f"  [{model_name}] autocorreção: {last_error[:60]}")
