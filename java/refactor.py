@@ -2214,6 +2214,31 @@ def _build_active_rules(
             "(`.ok()` → 200, `.status(XYZ)` → XYZ), NOT the @ResponseStatus annotation.\n"
         )
 
+    # N10: controller-null-input pattern — LLM frequently writes assertNull(response.getBody())
+    # without mocking the service to return null. The body is whatever the service returned,
+    # NOT null by default. Different from N4 (which is about @ResponseStatus being ignored).
+    _is_restcontroller = "@RestController" in original
+    _returns_response_entity = bool(re.search(
+        r'public\s+(?:final\s+)?ResponseEntity\s*[<(]', original
+    ))
+    if _is_restcontroller and _returns_response_entity:
+        active_rules += (
+            "\n\n### CONTROLLER NULL-INPUT TEST PATTERN (MANDATORY)\n"
+            "When writing a test where the controller method receives a null input "
+            "(e.g. `controller.method(null)`):\n"
+            "  - The response body is NOT null by default — it is whatever the underlying\n"
+            "    service returns when called with null.\n"
+            "  - SOLUTION 1: explicitly mock the service to return null for that case:\n"
+            "      when(service.method(any())).thenReturn(null);\n"
+            "      assertNull(response.getBody());\n"
+            "  - SOLUTION 2: assert on the response STRUCTURE (status, presence) instead:\n"
+            "      assertNotNull(response);\n"
+            "      assertEquals(HttpStatus.OK, response.getStatusCode());\n"
+            "  - NEVER: assertNull(response.getBody()) without first stubbing the service\n"
+            "    to return null. The body will reflect what service.method(null) actually\n"
+            "    returns (often a default object like TypeCode[field=null], not Java null)."
+        )
+
     # N6: service-with-lookup-logic preventive — warns LLM that mocks may not
     # passthrough to the assertion when the method has transformation logic.
     _has_repo_call = re.search(
