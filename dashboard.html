@@ -611,6 +611,8 @@
                 const newEstimate = remainingFiles * avgSec;
                 if (avgSec === 0 && remainingFiles > 0) {
                     etcEl.textContent = "Calculando...";
+                    etcEl.style.color = 'var(--accent-blue)';
+                    etcLabel.textContent = 'Tempo Restante (Est.)';
                 } else if (remainingFiles === 0 && stats.files_total > 0) {
                     // Todos os arquivos da fila aceitos, mas is_complete=false →
                     // fases pós-fila ainda rodam (dry-check cria Utils novas,
@@ -621,8 +623,14 @@
                         ? phaseLbl.slice(0, 18) + '…'
                         : phaseLbl;
                     etcEl.style.color = 'var(--accent-gold)';
+                    etcLabel.textContent = 'Fase em Andamento';
                     if (window.etcInterval) { clearInterval(window.etcInterval); window.etcInterval = null; }
                 } else {
+                    // Estado normal: contador regressivo. Garante label/cor padrão
+                    // caso o card tenha vindo do estado gold (pós-fila → counter
+                    // não acontece hoje, mas defensivo se files_total crescer).
+                    etcEl.style.color = 'var(--accent-blue)';
+                    etcLabel.textContent = 'Tempo Restante (Est.)';
                     const currentDisplay = etcEl.textContent;
                     const parts = currentDisplay.split(':').map(Number);
                     const currentSecs = (parts.length === 3 && !isNaN(parts[0]))
