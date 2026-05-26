@@ -1307,6 +1307,48 @@ def _try_surgical_patch(test_code: str, maven_output: str) -> str | None:
     return None
 
 
+def _maven_output_got_worse(old_out: str, new_out: str) -> bool:
+    """Compare two Maven outputs and return True if the new one is WORSE than the old.
+
+    Heuristics:
+      - new has MORE [ERROR] lines that reference an error type than old → worse
+      - new contains a class of error (compile error, type mismatch) that wasn't in old → worse
+      - new is empty (test passed) → NOT worse
+      - new has same/fewer error indicators → NOT worse
+    """
+    if not new_out.strip():
+        return False  # patch made it pass — clearly not worse
+    if not old_out.strip():
+        return bool(new_out.strip())  # nothing → something = worse by definition
+
+    def _signature(out: str) -> tuple[int, set]:
+        # Count distinct error markers and capture error-type signatures
+        lines = [l for l in out.splitlines() if "[ERROR]" in l and "<<<" not in l]
+        # Strip line numbers, file paths, and variable values to compare error CATEGORIES
+        import re as _re
+        sigs: set = set()
+        for l in lines:
+            # Normalize: drop file paths, line:col, and angle-bracket values
+            s = _re.sub(r'/[\w/.\-]+\.java', '<path>', l)
+            s = _re.sub(r':\[\d+,\d+\]', '<loc>', s)
+            s = _re.sub(r':\d+', '<line>', s)
+            s = _re.sub(r'<[^>]*>', '<val>', s)
+            sigs.add(s.strip())
+        return len(lines), sigs
+
+    old_count, old_sigs = _signature(old_out)
+    new_count, new_sigs = _signature(new_out)
+
+    # 1) more error LINES → worse
+    if new_count > old_count:
+        return True
+    # 2) new error CATEGORIES that weren't there before → worse
+    new_categories = new_sigs - old_sigs
+    if new_categories:
+        return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Utilitários
 # ---------------------------------------------------------------------------
@@ -2510,13 +2552,24 @@ def generate_tests(repo_path: str, phase: str, rules: str,
                 _patched = _try_surgical_patch(test_code, combined_out)
                 if _patched is not None:
                     log(f"  [{test_name}] Patch cirúrgico aplicado — sem LLM", "OK")
+                    _original_code = test_code
+                    _original_out  = combined_out
                     write_file(test_path, _patched)
                     test_code = _patched
                     success, combined_out, coverage, missed_lines = \
                         maven_test_with_coverage(repo_path, file_name)
                     if success:
                         continue
-                    # patch didn't fix it — fall through to LLM repair as normal
+                    # N8: patch didn't fix it AND made it worse → revert
+                    if _maven_output_got_worse(_original_out, combined_out):
+                        log(
+                            f"  [{test_name}] Patch P4 piorou o build — revertendo "
+                            "para estado anterior antes do LLM repair", "WARN",
+                        )
+                        write_file(test_path, _original_code)
+                        test_code = _original_code
+                        combined_out = _original_out
+                    # fall through to LLM repair as normal
                 history_block = (
                     f"REPAIR HISTORY (do NOT repeat these mistakes):\n"
                     + "\n".join(error_history) + "\n\n"
