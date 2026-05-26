@@ -446,5 +446,16 @@ def call_ai_with_correction(original: str, rules: str, mode: str,
     if recovery_result:
         return recovery_result
 
+    # N3: escalate to MODEL_STRUCT (smaller, faster) when MODEL_RECOVERY exhausts.
+    # Skip if both env vars point to the same model — no point retrying identical.
+    if MODEL_STRUCT and MODEL_STRUCT != MODEL_RECOVERY:
+        log(f"  [Autocura] Escalando para modelo menor ({MODEL_STRUCT}) após {MODEL_RECOVERY} falhar...", "WARN")
+        struct_result = _try_local_agent("recovery-fallback", MODEL_STRUCT, correction_prompt,
+                                          temperature=0.1, timeout=call_timeout,
+                                          num_predict=call_num_predict)
+        if struct_result:
+            log(f"  [Autocura] {MODEL_STRUCT} (fallback) gerou correção válida.", "OK")
+            return struct_result
+
     log("  [Autocura] Médico Local também falhou.", "ERR")
     return None
