@@ -477,6 +477,12 @@
         <div class="stat-label">Uso de CPU</div>
     </div>
 
+    <!-- % refatoração (somente produção, sem geração de testes) -->
+    <div class="stat-card">
+        <div id="refactor-only-pct" class="stat-value">0.0%</div>
+        <div class="stat-label">% Refatoração do Projeto</div>
+    </div>
+
     <!-- Tempo da classe ativa + Modelo + Skill -->
     <div class="stat-card" id="lock-card" style="grid-column: span 2;">
         <div style="display:flex; align-items:baseline; gap:1rem; justify-content:center; flex-wrap:wrap;">
@@ -578,6 +584,8 @@
             document.getElementById('progress').textContent = `${stats.files_completed}/${stats.files_total}`;
             const pctRefactored = (typeof stats.percent_refactored === 'number') ? stats.percent_refactored : 0.0;
             document.getElementById('refactored-pct').textContent = pctRefactored.toFixed(1) + '%';
+            const pctRefactorOnly = (typeof stats.percent_refactor_only === 'number') ? stats.percent_refactor_only : 0.0;
+            document.getElementById('refactor-only-pct').textContent = pctRefactorOnly.toFixed(1) + '%';
 
             // S2: ETC — se pipeline completo, mostra duração total em vez do contador
             const etcEl    = document.getElementById('etc');

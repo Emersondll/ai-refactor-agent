@@ -70,6 +70,7 @@ def _parse_jsonl():
     steps = []
     seen_files = set()
     accepted_files = set()  # deduplica: conta cada classe uma única vez
+    accepted_refactor_files = set()  # subset: arquivos de PRODUÇÃO aceitos (exclui testes)
     file_start_times = {}   # filename → datetime
     durations = []          # segundos por arquivo aceito
     last_file_seen = "Aguardando..."
@@ -144,6 +145,11 @@ def _parse_jsonl():
             if filename not in accepted_files:
                 accepted_files.add(filename)
                 stats["files_completed"] += 1
+            # Refator de PRODUÇÃO: exclui arquivos de teste (convenção *Test.java).
+            # Files de teste podem ser tocados por fases de community (dead-code,
+            # naming, etc.), mas não contam como "refatoração do projeto".
+            if filename and not filename.endswith("Test.java") and not filename.endswith("Tests.java"):
+                accepted_refactor_files.add(filename)
             for s in steps:
                 if s["name"] == filename and s["status"] == "processing":
                     s["status"] = "completed"
@@ -185,6 +191,7 @@ def _parse_jsonl():
         stats["avg_seconds_per_file"] = sum(durations) / len(durations)
 
     stats["files_total"] = max(stats["files_total"], stats["files_completed"])
+    stats["accepted_refactor_count"] = len(accepted_refactor_files)
 
     jsonl_active = next(
         (s["name"] for s in reversed(steps) if s["status"] == "processing"),
@@ -322,6 +329,12 @@ def _write_output(stats: dict, steps: list, active_file: str, active_elapsed: fl
     _total = stats.get("files_total", 0) or 0
     _done  = stats.get("files_completed", 0) or 0
     stats["percent_refactored"] = round((_done / _total) * 100.0, 1) if _total > 0 else 0.0
+
+    # % SOMENTE de refatoração de produção — denominador = files_total (universo
+    # completo: testes + produção). Numerador = arquivos de produção aceitos
+    # (qualquer fase). Excluímos testes por nome (convenção *Test.java).
+    _refactor_only = stats.get("accepted_refactor_count", 0) or 0
+    stats["percent_refactor_only"] = round((_refactor_only / _total) * 100.0, 1) if _total > 0 else 0.0
 
     data = {
         "heartbeat": datetime.now().isoformat(),
