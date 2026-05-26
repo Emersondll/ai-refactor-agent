@@ -60,6 +60,75 @@ _SKIP_LABELS = {
 
 
 # ---------------------------------------------------------------------------
+# M11: Fix Candidates section
+# ---------------------------------------------------------------------------
+
+def _build_fix_candidates_section(entries: list[dict], fixes: list[dict] | None = None) -> str:
+    """Return a Markdown section listing permanent_skip entries whose stack/reason
+    is covered by a fix in fix_metadata.json that was applied AFTER the entry's
+    timestamp. These files are likely to compile/pass on the next run if forced
+    to retry. Returns empty string if no candidates.
+
+    `entries`: contents of logs/failed_files.json
+    `fixes`:   contents of logs/fix_metadata.json (or get_fixes() if None)
+    """
+    import datetime as _dt
+    if fixes is None:
+        try:
+            from java.fix_metadata import get_fixes
+            fixes = get_fixes()
+        except Exception:
+            fixes = []
+    if not fixes:
+        return ""
+
+    candidates: list[tuple[str, list[str]]] = []  # (basename, [fix_ids])
+    for e in entries or []:
+        if not e.get("permanent_skip"):
+            continue
+        ts_raw = e.get("timestamp")
+        if not ts_raw:
+            continue
+        try:
+            entry_ts = _dt.datetime.fromisoformat(ts_raw)
+        except Exception:
+            continue
+        haystack = (e.get("stack_trace") or "") + " " + (e.get("reason") or "")
+        matching: list[str] = []
+        for f in fixes:
+            try:
+                f_ts = _dt.datetime.fromisoformat(f.get("applied_at", ""))
+            except Exception:
+                continue
+            if entry_ts >= f_ts:
+                continue
+            if any(p in haystack for p in f.get("patterns", [])):
+                matching.append(f.get("id", "?"))
+        if matching:
+            basename = e["file"].split("/")[-1]
+            candidates.append((basename, sorted(set(matching))))
+
+    if not candidates:
+        return ""
+
+    lines = [
+        "## Fix Candidates",
+        "",
+        "Os seguintes arquivos estão em `permanent_skip` mas fixes recentes "
+        "em `logs/fix_metadata.json` cobrem o padrão de erro deles. "
+        "Considere re-rodar com `FORCE_RETRY=<basename>` no `.env` "
+        "ou `python main.py --clear-skip <basename>` antes do próximo run.",
+        "",
+        "| Arquivo | Fixes candidatos |",
+        "|---------|------------------|",
+    ]
+    for basename, fix_ids in candidates:
+        lines.append(f"| `{basename}` | {', '.join(fix_ids)} |")
+    lines.append("")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Extração de dados do JSONL
 # ---------------------------------------------------------------------------
 
@@ -322,6 +391,21 @@ def run_report(repo_path: str, jsonl_path: str, logs_dir: str, exec_logger=None)
     if not report_md:
         log("[Report] LLM indisponível — gerando relatório estruturado", "WARN")
         report_md = _build_fallback_report(summaries, coverages, session)
+
+    # M11: Fix Candidates section
+    try:
+        import json as _json
+        from java.fix_metadata import get_fixes as _get_fixes
+        _failed_path = os.path.join(logs_dir, "failed_files.json")
+        _failed_entries = []
+        if os.path.exists(_failed_path):
+            with open(_failed_path) as _f:
+                _failed_entries = _json.load(_f)
+        _section = _build_fix_candidates_section(_failed_entries, fixes=_get_fixes())
+        if _section:
+            report_md = report_md.rstrip() + "\n\n" + _section + "\n"
+    except Exception as _exc:
+        log(f"M11 fix-candidates section skipped: {_exc}", "WARN")
 
     # Salva no diretório de logs
     log_report_path = os.path.join(logs_dir, "refactoring_report.md")
