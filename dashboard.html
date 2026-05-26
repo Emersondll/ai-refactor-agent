@@ -456,6 +456,10 @@
         <div class="stat-label">Cobertura Global de Testes</div>
     </div>
     <div class="stat-card">
+        <div id="refactored-pct" class="stat-value">0.0%</div>
+        <div class="stat-label">% Refatorado (Testes + Código)</div>
+    </div>
+    <div class="stat-card">
         <div id="etc" class="stat-value">00:00:00</div>
         <div id="etc-label" class="stat-label">Tempo Restante (Est.)</div>
     </div>
@@ -572,6 +576,8 @@
             // Stats
             document.getElementById('coverage').textContent = stats.current_coverage.toFixed(2) + '%';
             document.getElementById('progress').textContent = `${stats.files_completed}/${stats.files_total}`;
+            const pctRefactored = (typeof stats.percent_refactored === 'number') ? stats.percent_refactored : 0.0;
+            document.getElementById('refactored-pct').textContent = pctRefactored.toFixed(1) + '%';
 
             // S2: ETC — se pipeline completo, mostra duração total em vez do contador
             const etcEl    = document.getElementById('etc');

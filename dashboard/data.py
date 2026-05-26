@@ -316,6 +316,13 @@ def _write_output(stats: dict, steps: list, active_file: str, active_elapsed: fl
     # quando o JSONL não tem FILE_START ativo (fases LLM não emitem esse evento)
     display_file = active_file or live.get("current_file", "") or "Aguardando..."
 
+    # % de código refatorado — inclui testes gerados E refatorações de produção.
+    # files_completed conta FILE_ACCEPTED deduplicado por nome de arquivo (uma classe
+    # aceita em N fases = 1). files_total é o tamanho da fila inicial.
+    _total = stats.get("files_total", 0) or 0
+    _done  = stats.get("files_completed", 0) or 0
+    stats["percent_refactored"] = round((_done / _total) * 100.0, 1) if _total > 0 else 0.0
+
     data = {
         "heartbeat": datetime.now().isoformat(),
         "is_complete": is_complete,
