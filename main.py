@@ -423,5 +423,17 @@ def main():
     if len(failed_tracker) > 0:
         log(f"Aviso: {len(failed_tracker)} arquivos falharam. Use o reprocessador.", "WARN")
 
+    # Garante que o dashboard capture is_complete=True ANTES do processo sair.
+    # O background updater roda a cada 10s e morre junto com o main thread —
+    # sem esse write síncrono o último JSON pode não refletir PIPELINE_COMPLETE.
+    try:
+        subprocess.run(
+            ["python3", os.path.join("dashboard", "data.py")],
+            capture_output=True, timeout=15,
+        )
+        log("Dashboard final atualizado (is_complete=True persistido)", "OK")
+    except Exception as _e:
+        log(f"Falha ao atualizar dashboard final: {_e}", "WARN")
+
 if __name__ == "__main__":
     main()

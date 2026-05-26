@@ -573,8 +573,11 @@
 
             const heartbeat = data.heartbeat ? new Date(data.heartbeat) : null;
             const isOffline = !heartbeat || (Date.now() - heartbeat.getTime()) > OFFLINE_THRESHOLD_MS;
-            setOffline(isOffline);
-            if (isOffline) return;
+            // Se o pipeline já finalizou, NÃO trate como offline — o estado final
+            // é válido permanentemente e deve ser exibido mesmo horas depois.
+            const showAsOffline = isOffline && !data.is_complete;
+            setOffline(showAsOffline);
+            if (showAsOffline) return;
 
             const stats = data.stats;
             const steps = data.steps;
