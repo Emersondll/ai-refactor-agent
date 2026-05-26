@@ -71,10 +71,16 @@ def _parse_jsonl():
     seen_files = set()
     accepted_files = set()  # deduplica: conta cada classe uma única vez
     accepted_refactor_files = set()  # subset: arquivos de PRODUÇÃO aceitos (exclui testes)
+    # Inserção de CONTEÚDO NOVO no projeto: testes criados do zero (+test) ou
+    # métodos novos adicionados a testes existentes (+complement). NÃO inclui
+    # modificações em código que já existia (+community, +refactor, +javadoc).
+    inserted_new_content_files = set()
     file_start_times = {}   # filename → datetime
     durations = []          # segundos por arquivo aceito
     last_file_seen = "Aguardando..."
     is_complete = False     # S2: True quando PIPELINE_COMPLETE detectado
+
+    _INSERTION_CHANGE_TYPES = {"+test", "+complement"}
 
     for entry in session:
         ts_str = entry.get("timestamp", "")
@@ -150,6 +156,11 @@ def _parse_jsonl():
             # naming, etc.), mas não contam como "refatoração do projeto".
             if filename and not filename.endswith("Test.java") and not filename.endswith("Tests.java"):
                 accepted_refactor_files.add(filename)
+            # Inserção de novo conteúdo no projeto (decisão pelo change_type):
+            # apenas +test (teste novo) e +complement (métodos novos em teste).
+            _ct_raw = entry.get("change_type") or ""
+            if filename and _ct_raw in _INSERTION_CHANGE_TYPES:
+                inserted_new_content_files.add(filename)
             for s in steps:
                 if s["name"] == filename and s["status"] == "processing":
                     s["status"] = "completed"
@@ -192,6 +203,7 @@ def _parse_jsonl():
 
     stats["files_total"] = max(stats["files_total"], stats["files_completed"])
     stats["accepted_refactor_count"] = len(accepted_refactor_files)
+    stats["inserted_new_content_count"] = len(inserted_new_content_files)
 
     jsonl_active = next(
         (s["name"] for s in reversed(steps) if s["status"] == "processing"),
@@ -323,12 +335,14 @@ def _write_output(stats: dict, steps: list, active_file: str, active_elapsed: fl
     # quando o JSONL não tem FILE_START ativo (fases LLM não emitem esse evento)
     display_file = active_file or live.get("current_file", "") or "Aguardando..."
 
-    # % de código refatorado — inclui testes gerados E refatorações de produção.
-    # files_completed conta FILE_ACCEPTED deduplicado por nome de arquivo (uma classe
-    # aceita em N fases = 1). files_total é o tamanho da fila inicial.
+    # % de CONTEÚDO NOVO inserido pelo pipeline (testes criados / complementados).
+    # Numerador: arquivos com FILE_ACCEPTED de change_type +test ou +complement
+    # (código que ORIGINALMENTE NÃO EXISTIA no projeto e foi inserido pelo fluxo).
+    # Denominador: files_total (universo elegível). NÃO confundir com Cobertura
+    # JaCoCo (current_coverage), que mede % de produção exercitada por testes.
     _total = stats.get("files_total", 0) or 0
-    _done  = stats.get("files_completed", 0) or 0
-    stats["percent_refactored"] = round((_done / _total) * 100.0, 1) if _total > 0 else 0.0
+    _inserted = stats.get("inserted_new_content_count", 0) or 0
+    stats["percent_refactored"] = round((_inserted / _total) * 100.0, 1) if _total > 0 else 0.0
 
     # % SOMENTE de refatoração de produção — denominador = files_total (universo
     # completo: testes + produção). Numerador = arquivos de produção aceitos
