@@ -2165,6 +2165,29 @@ def _build_active_rules(
             "(`.ok()` → 200, `.status(XYZ)` → XYZ), NOT the @ResponseStatus annotation.\n"
         )
 
+    # N6: service-with-lookup-logic preventive — warns LLM that mocks may not
+    # passthrough to the assertion when the method has transformation logic.
+    _has_repo_call = re.search(
+        r'\b\w*[Rr]epo\w*\.\s*find\w*\s*\(', original
+    ) is not None
+    _has_transform_logic = bool(re.search(
+        r'\.\s*(orElse|orElseThrow|orElseGet|map|filter)\s*\(', original
+    )) or bool(re.search(r'\bif\s*\(', original))
+    if _has_repo_call and _has_transform_logic:
+        active_rules += (
+            "\n\n### SERVICE LOOKUP WITH TRANSFORMATION (MANDATORY)\n"
+            "This class calls a repository AND has transformation/conditional logic\n"
+            "(.orElse / .map / if / etc.) between the repository call and the return.\n"
+            "WARNING: the value you stub into the mock may NOT be what the service\n"
+            "returns — the transformation can change it (.orElse fallback, .map(...),\n"
+            "if-branches, hardcoded defaults, etc.).\n"
+            "Before writing an assertion, READ the method body carefully:\n"
+            "  - What value does the mock return?\n"
+            "  - What transformations are applied to that value?\n"
+            "  - What is the FINAL value the method returns?\n"
+            "Assert against the FINAL value, NOT the mocked seed value."
+        )
+
     # S3: null assertions — prevents enum-vs-null failures
     active_rules += (
         "\n\n### NULL ASSERTIONS\n"
