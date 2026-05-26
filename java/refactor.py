@@ -2126,6 +2126,22 @@ def _build_active_rules(
             "Do NOT omit it — the class will not compile without it.\n"
         )
 
+    # N4: Spring controller using ResponseEntity AND @ResponseStatus — annotation is ignored
+    # by Spring when the return type is ResponseEntity. LLM keeps asserting against the
+    # @ResponseStatus value and tests fail at runtime.
+    if "@ResponseStatus" in original and "ResponseEntity" in original:
+        active_rules += (
+            "\n\n### SPRING RESPONSEENTITY + @ResponseStatus (MANDATORY)\n"
+            "This controller declares @ResponseStatus AND returns ResponseEntity.\n"
+            "Spring IGNORES @ResponseStatus when the return type is ResponseEntity —\n"
+            "the actual HTTP status comes from the ResponseEntity itself.\n"
+            "Examples:\n"
+            "  return ResponseEntity.ok().body(x)        → 200 OK   (NOT @ResponseStatus value)\n"
+            "  return ResponseEntity.status(201).body(x) → 201 CREATED\n"
+            "When asserting status in tests, use the value from the ResponseEntity call\n"
+            "(`.ok()` → 200, `.status(XYZ)` → XYZ), NOT the @ResponseStatus annotation.\n"
+        )
+
     # S3: null assertions — prevents enum-vs-null failures
     active_rules += (
         "\n\n### NULL ASSERTIONS\n"
