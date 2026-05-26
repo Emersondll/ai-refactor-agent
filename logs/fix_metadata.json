@@ -54,5 +54,23 @@
     ],
     "description": "Pre-Maven validator removes @Test methods calling private methods",
     "applied_at": "2026-05-25T20:30:00"
+  },
+  {
+    "id": "N1",
+    "patterns": [
+      "actual and formal argument lists differ in length"
+    ],
+    "description": "Constructor validator extended to enum types via dep_context",
+    "applied_at": "2026-05-26T11:00:00"
+  },
+  {
+    "id": "N5",
+    "patterns": [
+      "ACCEPTED> but was:",
+      "OK> but was:",
+      "CREATED> but was:"
+    ],
+    "description": "HttpStatus mismatch handler with ResponseEntity context",
+    "applied_at": "2026-05-26T11:30:00"
   }
 ]
