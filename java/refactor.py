@@ -932,6 +932,18 @@ _SKIP_FOR_STRUCTURAL = [
 
 _PERMANENT_SKIP_THRESHOLD = 3  # runs consecutivos com falha → skip permanente
 
+
+def _threshold_for(phase: str) -> int:
+    """Return the permanent_skip threshold for a phase.
+    Env var MAX_FAILS_<phase> overrides the default. Invalid values fall back."""
+    raw = os.environ.get(f"MAX_FAILS_{phase}", "")
+    if raw:
+        try:
+            return int(raw)
+        except ValueError:
+            pass
+    return _PERMANENT_SKIP_THRESHOLD
+
 # P1: padrões no stack_trace que indicam um bug já corrigido no pipeline.
 # Entradas permanent_skip cujo stack_trace contenha algum destes padrões são
 # automaticamente removidas em reset(), permitindo novo ciclo de geração.
@@ -971,7 +983,7 @@ class FailedFilesTracker:
         if stack_trace:
             entry["stack_trace"] = stack_trace[-800:]
         # Promover a permanent_skip se atingiu o threshold
-        if entry["fail_count"] >= _PERMANENT_SKIP_THRESHOLD:
+        if entry["fail_count"] >= _threshold_for(phase):
             entry["permanent_skip"] = True
             # Remove entradas prev_run anteriores — permanent_skip é o único registro necessário
             self._entries = [
