@@ -1268,7 +1268,14 @@ def _try_surgical_patch(test_code: str, maven_output: str) -> str | None:
             m = _pat.search(lines[idx])
             if m:
                 expr = m.group(1).strip()
-                new_call = f'assertEquals("{actual}", {expr})'
+                # N7: detect object toString (contains brackets, equals, parens) — these
+                # are NOT String values. Quoting them as String literals creates a
+                # type-mismatch assertion that fails WORSE than the original null check.
+                # Use assertNotNull(expr) — only certainty we have is "not null".
+                if re.search(r'[\[\]=()]', actual):
+                    new_call = f'assertNotNull({expr})'
+                else:
+                    new_call = f'assertEquals("{actual}", {expr})'
                 lines[idx] = lines[idx].replace(m.group(0), new_call, 1)
                 return "\n".join(lines) + ("\n" if test_code.endswith("\n") else "")
         return None
