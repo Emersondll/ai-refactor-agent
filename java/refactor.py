@@ -390,6 +390,12 @@ def _fix_constructor_calls(test_code: str, dep_context: str) -> str:
                 for t in expected_types:
                     v = _ctor_sample_value_at(t, len(sample_args), used_counts)
                     if v is None:
+                        # N1: try resolving as an enum from dep_context
+                        from java.data_holder_test_gen import _extract_enum_constants
+                        consts = _extract_enum_constants(dep_context, t)
+                        if consts:
+                            v = f"{t}.{consts[0]}"
+                    if v is None:
                         supported = False
                         break
                     sample_args.append(v)
