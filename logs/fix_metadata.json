@@ -38,5 +38,21 @@
     ],
     "description": "Enum support in P0",
     "applied_at": "2026-05-24T17:00:00"
+  },
+  {
+    "id": "M12",
+    "patterns": [
+      "has private access"
+    ],
+    "description": "Preventive private methods rule in active_rules",
+    "applied_at": "2026-05-25T20:00:00"
+  },
+  {
+    "id": "M13",
+    "patterns": [
+      "has private access"
+    ],
+    "description": "Pre-Maven validator removes @Test methods calling private methods",
+    "applied_at": "2026-05-25T20:30:00"
   }
 ]
