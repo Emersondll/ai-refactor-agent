@@ -1,10 +1,10 @@
 skill: dry-check
-description: Identifica código repetido em 2+ arquivos e extrai para classes utilitárias (DRY principle)
+description: Identify repeated code in 2+ files and extract into utility classes (DRY principle)
 tool: flow-dry
 skill_name: java-dry-extraction
 skill_section: LLM INSTRUCTIONS
 review_criteria: |
-  O diff deve APENAS extrair código idêntico ou quase-idêntico para classes utilitárias static.
-  REJEITE se: lógica de negócio alterada, comportamento de qualquer método diferente,
-  métodos de instância convertidos erroneamente para estático,
-  ou se a extração reduz legibilidade com mais de 3 parâmetros.
+  The diff must ONLY extract identical or near-identical code into static utility classes.
+  REJECT if: business logic changed, behavior of any method different,
+  instance methods incorrectly converted to static,
+  or if the extraction reduces readability with more than 3 parameters.

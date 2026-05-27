@@ -1,5 +1,5 @@
 skill: dead-code
-description: Remove variáveis locais não utilizadas e imports duplicados
+description: Remove unused local variables and duplicate imports
 tool: openrewrite
 artifact_coordinates:
   - org.openrewrite.recipe:rewrite-static-analysis:RELEASE
@@ -7,7 +7,7 @@ recipes:
   - org.openrewrite.staticanalysis.RemoveUnusedLocalVariables
   - org.openrewrite.java.RemoveUnusedImports
 review_criteria: |
-  O diff deve APENAS remover variáveis locais declaradas mas nunca lidas,
-  e imports redundantes.
-  REJEITE se: campos de instância removidos, métodos removidos,
-  ou qualquer lógica de fluxo alterada.
+  The diff must ONLY remove local variables declared but never read,
+  and redundant imports.
+  REJECT if: instance fields removed, methods removed,
+  or any control flow logic changed.

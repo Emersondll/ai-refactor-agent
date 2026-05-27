@@ -1,11 +1,11 @@
 skill: static-analysis
-description: Suite completa de análise estática OpenRewrite (CommonStaticAnalysis)
+description: Full OpenRewrite static analysis suite (CommonStaticAnalysis)
 tool: openrewrite
 artifact_coordinates:
   - org.openrewrite.recipe:rewrite-static-analysis:RELEASE
 recipes:
   - org.openrewrite.staticanalysis.CommonStaticAnalysis
 review_criteria: |
-  O diff deve apenas aplicar correções de análise estática conhecidas e seguras.
-  REJEITE se: lógica de negócio alterada, métodos removidos, ou mudanças em
-  anotações Spring/JPA/Hibernate.
+  The diff must only apply known-safe static analysis fixes.
+  REJECT if: business logic changed, methods removed, or changes to
+  Spring/JPA/Hibernate annotations.

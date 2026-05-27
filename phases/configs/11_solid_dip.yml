@@ -1,5 +1,5 @@
 skill: solid-dip
-description: Aplica DIP — substitui instanciação direta (new ConcreteService) por injeção via construtor
+description: Apply DIP — replace direct instantiation (new ConcreteService) with constructor injection
 tool: llm
 method_level: false
 class_level: true
@@ -11,7 +11,7 @@ max_agent: standard
 skip_dep_context: true
 skip_compression: true
 review_criteria: |
-  O diff deve APENAS substituir instanciação direta de dependências por injeção de construtor.
-  REJEITE se: lógica de negócio alterada, interfaces inventadas sem estar no dep_context,
-  assinaturas de métodos públicos modificadas, ou comportamento em runtime diferente.
-  APROVE se: new ConcreteService() foi substituído por injeção e o campo é private final.
+  The diff must ONLY replace direct dependency instantiation with constructor injection.
+  REJECT if: business logic changed, interfaces invented not present in dep_context,
+  public method signatures modified, or runtime behavior different.
+  APPROVE if: new ConcreteService() was replaced by injection and the field is private final.

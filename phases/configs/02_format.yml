@@ -1,6 +1,6 @@
 skill: format
-description: Aplica Google Java Format para formatação consistente
+description: Apply Google Java Format for consistent formatting
 tool: google-java-format
 review_criteria: |
-  O diff deve APENAS ajustar formatação (indentação, espaços, quebras de linha).
-  REJEITE se: qualquer lógica, estrutura ou conteúdo semântico foi alterado.
+  The diff must ONLY adjust formatting (indentation, spaces, line breaks).
+  REJECT if: any logic, structure, or semantic content was changed.

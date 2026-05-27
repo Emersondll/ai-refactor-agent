@@ -1,5 +1,5 @@
 skill: final-keywords
-description: Adiciona final a variáveis locais e parâmetros não reatribuídos
+description: Add final to local variables and parameters that are never reassigned
 tool: openrewrite
 artifact_coordinates:
   - org.openrewrite.recipe:rewrite-static-analysis:RELEASE
@@ -7,7 +7,7 @@ recipes:
   - org.openrewrite.staticanalysis.FinalizeLocalVariables
   - org.openrewrite.staticanalysis.FinalizeMethodArguments
 review_criteria: |
-  O diff deve APENAS adicionar 'final' a variáveis locais e parâmetros de método
-  onde o valor nunca é reatribuído após a declaração.
-  REJEITE se: lógica alterada, métodos adicionados ou removidos,
-  ou qualquer mudança além da inserção da palavra-chave 'final'.
+  The diff must ONLY add 'final' to local variables and method parameters
+  where the value is never reassigned after declaration.
+  REJECT if: logic changed, methods added or removed,
+  or any change beyond inserting the 'final' keyword.

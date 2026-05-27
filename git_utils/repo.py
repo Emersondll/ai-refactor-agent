@@ -1,13 +1,13 @@
 """
-repo.py — Localização: git/repo.py
+repo.py — Location: git/repo.py
 
-ATUALIZADO com suporte a BRANCH automática.
+Updated with automatic BRANCH support.
 
-Fluxo:
-  1. Clone: cria branch refactor/ai-YYYYMMDD_HHMMSS
-  2. Update: volta para main, faz pull, cria nova branch
-  3. Nunca trabalha em main (seguro 100%)
-  4. Retorna (repo_path, branch_name) para main.py fazer commits
+Flow:
+  1. Clone: creates branch refactor/ai-YYYYMMDD_HHMMSS
+  2. Update: returns to main, pulls, creates new branch
+  3. Never works on main (100% safe)
+  4. Returns (repo_path, branch_name) for main.py to make commits
 """
 
 import os
@@ -18,80 +18,80 @@ from core.logger import log
 
 def clone_or_update(repo: str, base_dir: str) -> tuple[str | None, str | None]:
     """
-    Clona ou atualiza um repositório, criando branch de trabalho.
-    
+    Clone or update a repository, creating a working branch.
+
     Returns:
-        (repo_path, branch_name) ou (None, None) em caso de falha
+        (repo_path, branch_name) or (None, None) on failure
     """
     name      = repo.rstrip("/").split("/")[-1].replace(".git", "")
     repo_path = os.path.join(base_dir, name)
-    
-    # Nome de branch fixo para evitar perda de progresso entre execuções
+
+    # Fixed branch name to avoid losing progress between runs
     branch_name = "refactor/ai-agent-automation"
 
     if not os.path.exists(repo_path):
-        # --- NOVO CLONE ---
-        log(f"Clonando {repo} → {repo_path}")
+        # --- NEW CLONE ---
+        log(f"Cloning {repo} → {repo_path}")
         code, _, err = run_cmd(f'git clone "{repo}" "{repo_path}"')
         if code != 0:
-            log(f"Falha no clone: {err.strip()[:300]}", "ERR")
+            log(f"Clone failed: {err.strip()[:300]}", "ERR")
             return None, None
-        
-        log("Clone bem-sucedido", "OK")
+
+        log("Clone successful", "OK")
     else:
-        # --- REPOSITÓRIO JÁ EXISTE ---
-        log(f"Repositório já existe em {repo_path}")
-        
-        # Volta para main/master antes de fazer pull
+        # --- REPOSITORY ALREADY EXISTS ---
+        log(f"Repository already exists at {repo_path}")
+
+        # Return to main/master before pulling
         code, current, _ = run_cmd("git rev-parse --abbrev-ref HEAD", cwd=repo_path)
         current_branch = current.strip() if code == 0 else "unknown"
-        log(f"Branch atual: {current_branch}")
-        
-        # Detecta main ou master
+        log(f"Current branch: {current_branch}")
+
+        # Detect main or master
         main_branch = None
         for candidate in ["main", "master"]:
             code, _, _ = run_cmd(f"git show-ref --verify --quiet refs/heads/{candidate}", cwd=repo_path)
             if code == 0:
                 main_branch = candidate
                 break
-        
+
         if not main_branch:
-            log("Não encontrou main ou master", "ERR")
+            log("Could not find main or master", "ERR")
             return None, None
-        
-        log(f"Voltando para {main_branch}")
+
+        log(f"Switching to {main_branch}")
         run_cmd(f"git checkout {main_branch}", cwd=repo_path)
-        
-        # Faz pull para atualizar
-        log(f"Atualizando {main_branch}")
+
+        # Pull to update
+        log(f"Updating {main_branch}")
         code, _, err = run_cmd("git pull", cwd=repo_path)
         if code != 0:
-            log(f"Aviso no pull: {err.strip()[:200]}", "WARN")
+            log(f"Warning on pull: {err.strip()[:200]}", "WARN")
 
-    # CRIA A BRANCH DE TRABALHO
-    # CRIA OU VOLTA PARA A BRANCH DE TRABALHO
-    log(f"Preparando branch: {branch_name}")
+    # CREATE THE WORKING BRANCH
+    # CREATE OR SWITCH TO THE WORKING BRANCH
+    log(f"Preparing branch: {branch_name}")
     code_exists, _, _ = run_cmd(f"git show-ref --verify --quiet refs/heads/{branch_name}", cwd=repo_path)
-    
+
     if code_exists == 0:
-        log(f"Branch {branch_name} já existe. Fazendo checkout...")
+        log(f"Branch {branch_name} already exists. Checking out...")
         code, _, err = run_cmd(f"git checkout {branch_name}", cwd=repo_path)
         if code == 0:
-            # Sincroniza com o remote para evitar non-fast-forward no push final
+            # Sync with remote to avoid non-fast-forward on final push
             sync_code, _, sync_err = run_cmd(f"git pull --rebase origin {branch_name}", cwd=repo_path)
             if sync_code != 0:
-                log(f"Aviso ao sincronizar branch remota: {sync_err.strip()[:200]}", "WARN")
+                log(f"Warning syncing remote branch: {sync_err.strip()[:200]}", "WARN")
             else:
-                log(f"Branch sincronizada com origin/{branch_name}", "OK")
+                log(f"Branch synced with origin/{branch_name}", "OK")
     else:
-        log(f"Criando nova branch: {branch_name}")
+        log(f"Creating new branch: {branch_name}")
         code, _, err = run_cmd(f"git checkout -b {branch_name}", cwd=repo_path)
 
     if code != 0:
-        log(f"Falha ao acessar branch {branch_name}: {err.strip()[:300]}", "ERR")
+        log(f"Failed to access branch {branch_name}: {err.strip()[:300]}", "ERR")
         return None, None
 
-    log(f"Branch preparada com sucesso", "OK")
+    log(f"Branch ready", "OK")
     return repo_path, branch_name
 
 
@@ -101,7 +101,7 @@ _AGENT_GITIGNORE_ENTRIES = [
 ]
 
 def _ensure_agent_gitignore(repo_path: str) -> None:
-    """Garante que o .gitignore do repo alvo nunca inclua os diretórios internos do agente."""
+    """Ensures the target repo's .gitignore never includes agent internal directories."""
     gitignore_path = os.path.join(repo_path, ".gitignore")
     try:
         existing = open(gitignore_path).read() if os.path.exists(gitignore_path) else ""
@@ -110,22 +110,22 @@ def _ensure_agent_gitignore(repo_path: str) -> None:
             with open(gitignore_path, "a") as f:
                 f.write("\n### AI Refactor Agent — internal cache (never commit) ###\n")
                 f.write("\n".join(missing) + "\n")
-            log(f"[gitignore] Entradas adicionadas: {missing}", "OK")
+            log(f"[gitignore] Entries added: {missing}", "OK")
     except Exception as exc:
-        log(f"[gitignore] Não foi possível atualizar .gitignore: {exc}", "WARN")
+        log(f"[gitignore] Could not update .gitignore: {exc}", "WARN")
 
 
 def commit_and_push(repo_path: str, branch_name: str, phase: str) -> bool:
     """
-    Faz git add + commit + push após cada fase.
-    
+    Run git add + commit + push after each phase.
+
     Args:
-        repo_path: caminho do repositório
-        branch_name: nome da branch (ex: refactor/ai-20240115_140000)
-        phase: nome da fase (ex: 01_javadoc.md)
-    
+        repo_path: repository path
+        branch_name: branch name (e.g. refactor/ai-20240115_140000)
+        phase: phase name (e.g. 01_javadoc.md)
+
     Returns:
-        True se o commit foi criado com sucesso
+        True if the commit was created successfully
     """
     _ensure_agent_gitignore(repo_path)
     run_cmd("git add .", cwd=repo_path)
@@ -136,33 +136,33 @@ def commit_and_push(repo_path: str, branch_name: str, phase: str) -> bool:
     )
 
     if code != 0:
-        log(f"Nenhuma mudança para commitar na fase {phase}", "WARN")
+        log(f"No changes to commit in phase {phase}", "WARN")
         return False
 
-    # Push — com rebase automático em caso de non-fast-forward
+    # Push — with automatic rebase on non-fast-forward
     push_code, _, push_err = run_cmd(f"git push origin {branch_name}", cwd=repo_path)
     if push_code == 0:
-        log(f"Commit + push realizados ({phase}) em {branch_name}", "OK")
+        log(f"Commit + push done ({phase}) on {branch_name}", "OK")
         return True
 
-    log(f"Push falhou ({push_err.strip()[:120]}), tentando rebase...", "WARN")
+    log(f"Push failed ({push_err.strip()[:120]}), trying rebase...", "WARN")
     rebase_code, _, rebase_err = run_cmd(f"git pull --rebase origin {branch_name}", cwd=repo_path)
     if rebase_code == 0:
         push_code2, _, push_err2 = run_cmd(f"git push origin {branch_name}", cwd=repo_path)
         if push_code2 == 0:
-            log(f"Push realizado após rebase ({phase})", "OK")
+            log(f"Push done after rebase ({phase})", "OK")
             return True
-        log(f"Push falhou mesmo após rebase: {push_err2.strip()[:200]}", "WARN")
+        log(f"Push failed even after rebase: {push_err2.strip()[:200]}", "WARN")
     else:
-        log(f"Rebase falhou: {rebase_err.strip()[:200]}", "WARN")
+        log(f"Rebase failed: {rebase_err.strip()[:200]}", "WARN")
 
-    # Fallback: force-with-lease (seguro — só força se ninguém mais empurrou)
+    # Fallback: force-with-lease (safe — only forces if nobody else pushed)
     force_code, _, force_err = run_cmd(f"git push --force-with-lease origin {branch_name}", cwd=repo_path)
     if force_code == 0:
-        log(f"Push com force-with-lease realizado ({phase})", "WARN")
+        log(f"Push with force-with-lease done ({phase})", "WARN")
         return True
 
-    log(f"Push falhou definitivamente: {force_err.strip()[:200]}", "ERR")
+    log(f"Push failed definitively: {force_err.strip()[:200]}", "ERR")
     return False
 
 
