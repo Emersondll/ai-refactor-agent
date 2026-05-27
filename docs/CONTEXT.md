@@ -1,83 +1,83 @@
-# 🧠 CONTEXTO DO PROJETO — AI REFACTOR AGENT (JAVA)
+# 🧠 PROJECT CONTEXT — AI REFACTOR AGENT (JAVA)
 
-## 🎯 OBJETIVO
+## 🎯 OBJECTIVE
 
-Criar um agente automatizado que:
+Create an automated agent that:
 
-* acessa repositórios no GitHub
-* identifica projetos Java
-* aplica refatorações baseadas em um padrão central (`CLAUDE.md`)
-* valida build
-* sobe alterações automaticamente
+* accesses repositories on GitHub
+* identifies Java projects
+* applies refactoring based on a central standard (`CLAUDE.md`)
+* validates the build
+* pushes changes automatically
 
 ---
 
-## ⚙️ COMPORTAMENTO DO AGENTE
+## ⚙️ AGENT BEHAVIOR
 
-A cada execução:
+On each execution:
 
 ```text
-1. Busca repositórios do usuário no GitHub
-2. Filtra candidatos (linguagem Java ou nome)
-3. Clona o repositório em diretório temporário (/tmp)
-4. Valida se é projeto Java (pom.xml ou gradle)
-5. Injeta/atualiza CLAUDE.md (sempre sobrescreve)
-6. Seleciona 1 arquivo .java
-7. Envia para IA (Claude) para refatoração
-8. Salva backup (.bak)
-9. Executa build (Maven/Gradle)
-10. Se sucesso:
-    - commit controlado
-    - push para branch ai/refactor
-11. Se falha:
-    - rollback do arquivo
-12. Marca repo como processado
-13. Executa apenas 1 repo por dia
+1. Fetches the user's repositories from GitHub
+2. Filters candidates (Java language or name match)
+3. Clones the repository into a temporary directory (/tmp)
+4. Validates that it is a Java project (pom.xml or gradle)
+5. Injects/updates CLAUDE.md (always overwrites)
+6. Selects 1 .java file
+7. Sends to the AI (Claude) for refactoring
+8. Saves a backup (.bak)
+9. Runs the build (Maven/Gradle)
+10. On success:
+    - controlled commit
+    - push to branch ai/refactor
+11. On failure:
+    - rolls back the file
+12. Marks the repo as processed
+13. Processes only 1 repo per day
 ```
 
 ---
 
-## 🧠 PADRÃO CENTRAL
+## 🧠 CENTRAL STANDARD
 
-Arquivo:
+File:
 
 ```text
 CLAUDE.md
 ```
 
-Função:
+Purpose:
 
-* define regras de refatoração
-* guia a IA
-* é injetado em todos os repositórios processados
-
----
-
-## 🔐 CONTROLE DE EXECUÇÃO
-
-### Arquivos locais:
-
-* `processed_repos.txt` → evita reprocessar repos
-* `last_run.txt` → limita execução a 1 vez por dia
+* defines refactoring rules
+* guides the AI
+* is injected into all processed repositories
 
 ---
 
-## 🛡️ CONTROLE DE SEGURANÇA
+## 🔐 EXECUTION CONTROL
 
-### Evita:
+### Local files:
 
-* reprocessamento
-* loop infinito
-* excesso de uso de API
-* commits desnecessários
-* inclusão de arquivos indevidos
+* `processed_repos.txt` → prevents reprocessing repos
+* `last_run.txt` → limits execution to once per day
 
-### Estratégias:
+---
 
-* diretório isolado (`/tmp`)
-* limite de tamanho de arquivo (~50KB)
-* delay entre execuções
-* commit controlado:
+## 🛡️ SECURITY CONTROL
+
+### Prevents:
+
+* reprocessing
+* infinite loop
+* excessive API usage
+* unnecessary commits
+* inclusion of unintended files
+
+### Strategies:
+
+* isolated directory (`/tmp`)
+* file size limit (~50KB)
+* delay between executions
+* controlled commit:
 
 ```bash
 git add -u
@@ -86,54 +86,54 @@ git add CLAUDE.md
 
 ---
 
-## ⚠️ PONTOS CRÍTICOS RESOLVIDOS
+## ⚠️ RESOLVED CRITICAL ISSUES
 
-### 1. Problema de quota (OpenAI)
+### 1. Quota problem (OpenAI)
 
-* substituído por Claude (Anthropic)
-
----
-
-### 2. Risco de subir arquivos indesejados
-
-* removido `git add .`
-* uso de `git add -u`
+* replaced by Claude (Anthropic)
 
 ---
 
-### 3. Reprocessamento infinito
+### 2. Risk of pushing unintended files
 
-* resolvido com controle de estado (`processed_repos.txt`)
-
----
-
-### 4. Execução excessiva
-
-* limitado para **1 repositório por dia**
+* removed `git add .`
+* using `git add -u`
 
 ---
 
-### 5. Falta de visibilidade
+### 3. Infinite reprocessing
 
-* adicionados logs:
-
-  * repos encontrados
-  * linguagem detectada
-  * decisões de filtro
+* resolved with state control (`processed_repos.txt`)
 
 ---
 
-## 🔧 STACK UTILIZADA
+### 4. Excessive execution
+
+* limited to **1 repository per day**
+
+---
+
+### 5. Lack of visibility
+
+* added logs:
+
+  * repos found
+  * language detected
+  * filter decisions
+
+---
+
+## 🔧 TECH STACK
 
 * Python 3
 * Git
 * Maven / Gradle
-* API da Anthropic (Claude)
-* API do GitHub
+* Anthropic API (Claude)
+* GitHub API
 
 ---
 
-## 🔑 CONFIGURAÇÃO (.env)
+## 🔑 CONFIGURATION (.env)
 
 ```env
 ANTHROPIC_API_KEY=...
@@ -143,7 +143,7 @@ GITHUB_USERNAME=...
 
 ---
 
-## 🚀 EXECUÇÃO
+## 🚀 EXECUTION
 
 ```bash
 source venv/bin/activate
@@ -152,40 +152,39 @@ python agent.py
 
 ---
 
-## 📂 ESTRATÉGIA DE ISOLAMENTO
+## 📂 ISOLATION STRATEGY
 
-* repos são clonados em `/tmp`
-* removidos ao final (ou mantidos para debug)
-* evita interferência com projeto local
-
----
-
-## 🧠 LIMITAÇÕES ATUAIS
-
-* processa apenas 1 arquivo por repo
-* depende de crédito na API Claude
-* depende da detecção de linguagem do GitHub
-* não cria Pull Request (push direto em branch)
+* repos are cloned into `/tmp`
+* removed at the end (or kept for debugging)
+* avoids interference with the local project
 
 ---
 
-## 🚀 POSSÍVEIS EVOLUÇÕES
+## 🧠 CURRENT LIMITATIONS
 
-* criação automática de PR
-* refatoração de múltiplos arquivos
-* análise de diff antes de commit
-* fallback entre provedores de IA
-* execução automática via cron
-* controle de custo por execução
+* processes only 1 file per repo
+* depends on Claude API credits
+* depends on GitHub language detection
+* does not create Pull Requests (direct push to branch)
 
 ---
 
-## 🎯 RESUMO FINAL
+## 🚀 POSSIBLE FUTURE IMPROVEMENTS
 
-Este projeto é um:
+* automatic PR creation
+* refactoring of multiple files
+* diff analysis before commit
+* fallback between AI providers
+* automatic execution via cron
+* cost control per execution
+
+---
+
+## 🎯 FINAL SUMMARY
+
+This project is a:
 
 ```text
-Agente autônomo de refatoração Java guiado por padrão central (CLAUDE.md),
-com controle de execução, segurança e integração com IA.
+Autonomous Java refactoring agent guided by a central standard (CLAUDE.md),
+with execution control, security, and AI integration.
 ```
-

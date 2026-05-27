@@ -86,34 +86,34 @@ mkdir -p "/home/emerson/Área de trabalho/ai-refactor-agent/phases/configs"
 
 ```yaml
 skill: clean-imports
-description: Remove imports não utilizados e ordena imports alfabeticamente
+description: Remove unused imports and sorts imports alphabetically
 tool: openrewrite
 artifact_coordinates: []
 recipes:
   - org.openrewrite.java.RemoveUnusedImports
   - org.openrewrite.java.OrderImports
 review_criteria: |
-  O diff deve APENAS remover linhas de import não utilizadas e reordenar imports.
-  REJEITE se: qualquer linha de código Java além de imports foi alterada,
-  ou se imports necessários foram removidos.
+  The diff must ONLY remove unused import lines and reorder imports.
+  REJECT if: any Java code line beyond imports was changed,
+  or if necessary imports were removed.
 ```
 
 - [ ] **Step 3: Create `phases/configs/02_format.yml`**
 
 ```yaml
 skill: format
-description: Aplica Google Java Format para formatação consistente
+description: Applies Google Java Format for consistent formatting
 tool: google-java-format
 review_criteria: |
-  O diff deve APENAS ajustar formatação (indentação, espaços, quebras de linha).
-  REJEITE se: qualquer lógica, estrutura ou conteúdo semântico foi alterado.
+  The diff must ONLY adjust formatting (indentation, spaces, line breaks).
+  REJECT if: any logic, structure, or semantic content was changed.
 ```
 
 - [ ] **Step 4: Create `phases/configs/03_final-keywords.yml`**
 
 ```yaml
 skill: final-keywords
-description: Adiciona final a variáveis locais e parâmetros não reatribuídos
+description: Adds final to local variables and parameters that are never reassigned
 tool: openrewrite
 artifact_coordinates:
   - org.openrewrite.recipe:rewrite-static-analysis:RELEASE
@@ -121,17 +121,17 @@ recipes:
   - org.openrewrite.staticanalysis.FinalizeLocalVariables
   - org.openrewrite.staticanalysis.FinalizeMethodArguments
 review_criteria: |
-  O diff deve APENAS adicionar 'final' a variáveis locais e parâmetros de método
-  onde o valor nunca é reatribuído após a declaração.
-  REJEITE se: lógica alterada, métodos adicionados ou removidos,
-  ou qualquer mudança além da inserção da palavra-chave 'final'.
+  The diff must ONLY add 'final' to local variables and method parameters
+  where the value is never reassigned after declaration.
+  REJECT if: logic changed, methods added or removed,
+  or any change beyond insertion of the 'final' keyword.
 ```
 
 - [ ] **Step 5: Create `phases/configs/04_naming-conventions.yml`**
 
 ```yaml
 skill: naming-conventions
-description: Renomeia identificadores para seguir convenções Java (camelCase/PascalCase)
+description: Renames identifiers to follow Java conventions (camelCase/PascalCase)
 tool: openrewrite
 artifact_coordinates:
   - org.openrewrite.recipe:rewrite-static-analysis:RELEASE
@@ -139,16 +139,16 @@ recipes:
   - org.openrewrite.staticanalysis.MethodNameCasing
   - org.openrewrite.staticanalysis.LocalVariableNameCasing
 review_criteria: |
-  O diff deve APENAS renomear métodos ou variáveis que violam convenções Java.
-  Nomes de campos e tipos não devem ser alterados por esta skill.
-  REJEITE se: lógica alterada, ou qualquer rename que possa quebrar API pública.
+  The diff must ONLY rename methods or variables that violate Java conventions.
+  Field and type names must not be changed by this skill.
+  REJECT if: logic changed, or any rename that could break public API.
 ```
 
 - [ ] **Step 6: Create `phases/configs/05_dead-code.yml`**
 
 ```yaml
 skill: dead-code
-description: Remove variáveis locais não utilizadas e imports duplicados
+description: Removes unused local variables and duplicate imports
 tool: openrewrite
 artifact_coordinates:
   - org.openrewrite.recipe:rewrite-static-analysis:RELEASE
@@ -156,17 +156,17 @@ recipes:
   - org.openrewrite.staticanalysis.RemoveUnusedLocalVariables
   - org.openrewrite.java.RemoveUnusedImports
 review_criteria: |
-  O diff deve APENAS remover variáveis locais declaradas mas nunca lidas,
-  e imports redundantes.
-  REJEITE se: campos de instância removidos, métodos removidos,
-  ou qualquer lógica de fluxo alterada.
+  The diff must ONLY remove local variables declared but never read,
+  and redundant imports.
+  REJECT if: instance fields removed, methods removed,
+  or any flow logic changed.
 ```
 
 - [ ] **Step 7: Create `phases/configs/06_simplify-code.yml`**
 
 ```yaml
 skill: simplify-code
-description: Simplifica expressões booleanas e remove parênteses desnecessários
+description: Simplifies boolean expressions and removes unnecessary parentheses
 tool: openrewrite
 artifact_coordinates:
   - org.openrewrite.recipe:rewrite-static-analysis:RELEASE
@@ -175,17 +175,17 @@ recipes:
   - org.openrewrite.staticanalysis.SimplifyBooleanReturn
   - org.openrewrite.staticanalysis.UnnecessaryParentheses
 review_criteria: |
-  O diff deve APENAS simplificar expressões booleanas redundantes (ex: x == true → x),
-  simplificar retornos booleanos (ex: if (x) return true; else return false; → return x;)
-  e remover parênteses supérfluos.
-  REJEITE se: lógica ou resultado de qualquer expressão for alterado.
+  The diff must ONLY simplify redundant boolean expressions (e.g. x == true → x),
+  simplify boolean returns (e.g. if (x) return true; else return false; → return x;)
+  and remove superfluous parentheses.
+  REJECT if: logic or result of any expression is changed.
 ```
 
 - [ ] **Step 8: Create `phases/configs/07_modernize-syntax.yml`**
 
 ```yaml
 skill: modernize-syntax
-description: Moderniza sintaxe para padrões Java 17+ (diamond operator, String.isEmpty, etc.)
+description: Modernizes syntax to Java 17+ patterns (diamond operator, String.isEmpty, etc.)
 tool: openrewrite
 artifact_coordinates:
   - org.openrewrite.recipe:rewrite-static-analysis:RELEASE
@@ -194,27 +194,27 @@ recipes:
   - org.openrewrite.staticanalysis.UseStringIsEmpty
   - org.openrewrite.staticanalysis.NoDoubleBraceInitialization
 review_criteria: |
-  O diff deve APENAS substituir sintaxe verbosa por equivalentes modernos:
+  The diff must ONLY replace verbose syntax with modern equivalents:
   - new ArrayList<String>() → new ArrayList<>()
   - str.length() == 0 → str.isEmpty()
-  - Remover double brace initialization
-  REJEITE se: qualquer comportamento em runtime puder ser alterado.
+  - Remove double brace initialization
+  REJECT if: any runtime behavior could be changed.
 ```
 
 - [ ] **Step 9: Create `phases/configs/08_static-analysis.yml`**
 
 ```yaml
 skill: static-analysis
-description: Suite completa de análise estática OpenRewrite (CommonStaticAnalysis)
+description: Full OpenRewrite static analysis suite (CommonStaticAnalysis)
 tool: openrewrite
 artifact_coordinates:
   - org.openrewrite.recipe:rewrite-static-analysis:RELEASE
 recipes:
   - org.openrewrite.staticanalysis.CommonStaticAnalysis
 review_criteria: |
-  O diff deve apenas aplicar correções de análise estática conhecidas e seguras.
-  REJEITE se: lógica de negócio alterada, métodos removidos, ou mudanças em
-  anotações Spring/JPA/Hibernate.
+  The diff must only apply known and safe static analysis corrections.
+  REJECT if: business logic changed, methods removed, or changes to
+  Spring/JPA/Hibernate annotations.
 ```
 
 - [ ] **Step 10: Verify all 8 yml files are valid YAML**
@@ -575,12 +575,12 @@ def review_diff(diff: str, criteria: str, model: str) -> Literal["APPROVE", "REJ
 
 def _build_prompt(diff: str, criteria: str) -> str:
     return (
-        "Você é um revisor de código Java. Analise o diff abaixo.\n\n"
-        f"CRITÉRIOS DE APROVAÇÃO:\n{criteria}\n\n"
+        "You are a Java code reviewer. Analyze the diff below.\n\n"
+        f"APPROVAL CRITERIA:\n{criteria}\n\n"
         f"DIFF:\n{diff}\n\n"
-        "Responda APENAS com uma das opções:\n"
-        "APPROVE: <motivo em 1 linha>\n"
-        "REJECT: <motivo em 1 linha>"
+        "Respond ONLY with one of the following options:\n"
+        "APPROVE: <one-line reason>\n"
+        "REJECT: <one-line reason>"
     )
 ```
 
@@ -946,7 +946,7 @@ Find the `else:` branch of `if USE_AGENT_MODE:` (lines 120–134 of current `mai
 Old code to replace:
 ```python
     else:
-        log("Modo Pipeline fixo (USE_AGENT_MODE=false).", "PHASE")
+        log("Fixed pipeline mode (USE_AGENT_MODE=false).", "PHASE")
         phase_paths = sorted(
             os.path.join(root, fname)
             for root, _, files in os.walk(PHASES_DIR)
@@ -956,8 +956,8 @@ Old code to replace:
         for phase_path in phase_paths:
             phase_file = os.path.basename(phase_path)
             rules = read_file(phase_path)
-            log(f"Iniciando Fase: {phase_file}", "PHASE")
-            exec_logger.log_phase_start(phase_file, f"Iniciando {phase_file}")
+            log(f"Starting Phase: {phase_file}", "PHASE")
+            exec_logger.log_phase_start(phase_file, f"Starting {phase_file}")
             for f_path in get_java_files(repo_path):
                 refactor_file(f_path, rules, repo_path, phase_path, reporter, exec_logger,
                               cache=cache, semantic_mem=semantic_mem)
@@ -966,7 +966,7 @@ Old code to replace:
 New code:
 ```python
     else:
-        log("Modo Pipeline fixo (USE_AGENT_MODE=false).", "PHASE")
+        log("Fixed pipeline mode (USE_AGENT_MODE=false).", "PHASE")
         import glob as _glob
         import yaml as _yaml
         from java.community_runner import run_skill as _run_skill
@@ -979,38 +979,38 @@ New code:
         config_paths = sorted(_glob.glob(os.path.join(configs_dir, "*.yml")))
 
         if not config_paths:
-            log(f"Nenhum config .yml encontrado em {configs_dir}", "ERR")
+            log(f"No .yml config found in {configs_dir}", "ERR")
             return
 
         for config_path in config_paths:
             with open(config_path, "r", encoding="utf-8") as _f:
                 skill_config = _yaml.safe_load(_f)
             skill_id = skill_config.get("skill", os.path.basename(config_path))
-            log(f"Iniciando Skill: {skill_id}", "PHASE")
+            log(f"Starting Skill: {skill_id}", "PHASE")
             exec_logger.log_phase_start(skill_id, f"Community tool: {skill_id}")
 
             changed, diff = _run_skill(skill_config, repo_path)
             if not changed:
-                log(f"  [{skill_id}] sem alterações — pulando", "OK")
+                log(f"  [{skill_id}] no changes — skipping", "OK")
                 cache.mark_phase_done(skill_id)
                 continue
 
             verdict = _review_diff(diff, skill_config.get("review_criteria", ""), _MODEL_SOLID)
-            log(f"  [{skill_id}] revisor: {verdict}")
+            log(f"  [{skill_id}] reviewer: {verdict}")
 
             if verdict == "REJECT":
                 _run_cmd("git restore .", cwd=repo_path)
                 cache.mark_phase_done(skill_id)
-                log(f"  [{skill_id}] revertido (REJECT)", "WARN")
+                log(f"  [{skill_id}] reverted (REJECT)", "WARN")
                 continue
 
             build_ok, build_output = _maven_test(repo_path)
             if not build_ok:
-                log(f"  [{skill_id}] build quebrado após APPROVE — revertendo", "WARN")
+                log(f"  [{skill_id}] build broke after APPROVE — reverting", "WARN")
                 _run_cmd("git restore .", cwd=repo_path)
             else:
                 cache.mark_phase_done(skill_id)
-                log(f"  [{skill_id}] aceito ✓", "OK")
+                log(f"  [{skill_id}] accepted ✓", "OK")
 ```
 
 Also update the import at the top of `main.py` — remove unused imports. Find this line:

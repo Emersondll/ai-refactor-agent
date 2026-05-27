@@ -2,129 +2,129 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Corrigir 4 classes de problema identificadas na execução de 2026-05-22: erro de `java.sql.Timestamp` em testes gerados; instruções LLM mistas (PT + EN); mensagens PT no validator; e entradas `permanent_skip` de bugs já corrigidos bloqueando arquivos válidos.
+**Goal:** Fix 4 problem classes identified in the 2026-05-22 execution: `java.sql.Timestamp` error in generated tests; mixed LLM instructions (PT + EN); Portuguese messages in the validator; and `permanent_skip` entries from already-fixed bugs blocking valid files.
 
-**Architecture:** Todas as mudanças são em arquivos Python do pipeline. Nenhuma mudança no projeto Java alvo. Três arquivos principais tocados: `soul.md`, `java/refactor.py`, `java/validator.py`.
+**Architecture:** All changes are in Python pipeline files. No changes to the target Java project. Three main files touched: `soul.md`, `java/refactor.py`, `java/validator.py`.
 
 **Tech Stack:** Python 3.12, regex, `java/refactor.py` (active_rules + `_categorize_build_error` + `FailedFilesTracker`), `soul.md`, `java/validator.py`.
 
 ---
 
-## Diagnóstico dos Problemas
+## Problem Diagnosis
 
-### Problema 1 — `java.sql.Timestamp` formato errado em testes (ATIVO AGORA)
+### Problem 1 — `java.sql.Timestamp` wrong format in tests (ACTIVE NOW)
 
-**Erro capturado:**
+**Captured error:**
 ```
 TransactionDocumentTest.setUp:29 » IllegalArgument Timestamp format must be yyyy-mm-dd hh:mm:ss[.fffffffff]
 ```
 
-**Root cause:** `TransactionDocument.java` declara `private Timestamp timestamp` com `import java.sql.Timestamp`. O LLM gera o setUp com:
+**Root cause:** `TransactionDocument.java` declares `private Timestamp timestamp` with `import java.sql.Timestamp`. The LLM generates setUp with:
 ```java
-this.timestamp = Timestamp.valueOf("2023-01-15T10:00:00"); // ERRADO — "T" é ISO, não SQL
+this.timestamp = Timestamp.valueOf("2023-01-15T10:00:00"); // WRONG — "T" is ISO, not SQL
 ```
-O formato correto para `Timestamp.valueOf()` é `"yyyy-mm-dd hh:mm:ss"` (espaço entre data e hora, **sem** `T`).
+The correct format for `Timestamp.valueOf()` is `"yyyy-mm-dd hh:mm:ss"` (space between date and time, **without** `T`).
 
-**Gaps no código atual:**
-- `_JDK_IMPORT_MAP` em `refactor.py:52` não tem `Timestamp` → `_auto_inject_missing_imports` não injeta `import java.sql.Timestamp;`
-- Nenhuma regra preventiva em `active_rules` para classes com `java.sql.Timestamp`
-- `_categorize_build_error` não tem handler para `IllegalArgumentException` com mensagem de Timestamp format → cai no fallback genérico
+**Gaps in current code:**
+- `_JDK_IMPORT_MAP` in `refactor.py:52` does not have `Timestamp` → `_auto_inject_missing_imports` does not inject `import java.sql.Timestamp;`
+- No preventive rule in `active_rules` for classes with `java.sql.Timestamp`
+- `_categorize_build_error` has no handler for `IllegalArgumentException` with Timestamp format message → falls back to generic fallback
 
-**Arquivos afetados:**
-- `java/refactor.py` — `_JDK_IMPORT_MAP` (~linha 52), seção `active_rules` (~linha 1492), `_categorize_build_error` (~linha 140)
+**Affected files:**
+- `java/refactor.py` — `_JDK_IMPORT_MAP` (~line 52), `active_rules` section (~line 1492), `_categorize_build_error` (~line 140)
 
 ---
 
-### Problema 2 — `soul.md` em Português: instruções LLM mistas
+### Problem 2 — `soul.md` in Portuguese: mixed LLM instructions
 
-**Root cause:** `soul.md` (carregado como `_SOUL` em `ai/prompt.py:23` e injetado no TOPO de TODOS os prompts) está **100% em Português**. Já todos os `BASE_CONSTRAINTS`, `BASE_CONSTRAINTS_TEST`, e seções `active_rules` construídas em `refactor.py` estão em **Inglês**.
+**Root cause:** `soul.md` (loaded as `_SOUL` in `ai/prompt.py:23` and injected at the TOP of ALL prompts) is **100% in Portuguese**. Meanwhile, all `BASE_CONSTRAINTS`, `BASE_CONSTRAINTS_TEST`, and `active_rules` sections built in `refactor.py` are in **English**.
 
-Resultado: todo prompt enviado aos LLMs começa em PT e termina em EN. Isso é uma inconsistência estrutural — LLMs multilíngues têm comportamento mais estável quando o idioma das instruções é único.
+Result: every prompt sent to the LLMs starts in Portuguese and ends in English. This is a structural inconsistency — multilingual LLMs have more stable behavior when the language of instructions is uniform.
 
-**Exemplo de prompt atual (estrutura mista):**
+**Current prompt structure (mixed language):**
 ```
-[SOUL — Português]
-Você é um engenheiro sênior Java...
-Você nunca inventa, nunca assume...
+[SOUL — Portuguese]
+You are a senior Java engineer...
+You never invent, never assume...
 
-[BASE_CONSTRAINTS — Inglês]
+[BASE_CONSTRAINTS — English]
 ### TECHNICAL CONSTRAINTS (MANDATORY)
 PRESERVE the package declaration exactly as-is...
 
-[active_rules — Inglês]
+[active_rules — English]
 ### TEST CLASS — MANDATORY NAME AND PACKAGE...
 ```
 
-**Nota:** `report_runner.py:188` tem `"Escreva em Português do Brasil"` — isso é **correto** e **deve permanecer** (o relatório final é para o usuário, não para o LLM de refatoração/testes).
+**Note:** `report_runner.py:188` has `"Write in Brazilian Portuguese"` — this is **correct** and **must remain** (the final report is for the user, not for the refactoring/test LLM).
 
-**Arquivos afetados:**
-- `soul.md` — traduzir para Inglês, manter todo conteúdo comportamental
+**Affected files:**
+- `soul.md` — translate to English, keep all behavioral content
 
 ---
 
-### Problema 3 — `validator.py` com mensagens em Português
+### Problem 3 — `validator.py` with Portuguese messages
 
-**Root cause:** `java/validator.py` linhas 236 e 238 retornam mensagens em Português:
+**Root cause:** `java/validator.py` lines 236 and 238 return Portuguese messages:
 ```python
-# linha 236:
+# line 236:
 return False, f"O arquivo se chama '{file_name}.java' mas você gerou a classe '{found_name}'."
-# linha 238:
+# line 238:
 return False, f"Não foi encontrada a classe '{file_name}' no código gerado."
 ```
 
-Essas mensagens **não chegam ao LLM** diretamente (em `refactor.py:766-773` o `reason` é substituído por mensagem English antes de chamar o LLM). Mas aparecem em dois lugares:
-1. `failed_files.json` — como `reason` de entradas `permanent_skip` de runs anteriores (ex: `MerchantCategoryCodesServiceImplTest`)
-2. Logs internos de diagnóstico quando chamados por outros paths
+These messages **do not reach the LLM** directly (in `refactor.py:766-773` the `reason` is replaced by an English message before calling the LLM). But they appear in two places:
+1. `failed_files.json` — as `reason` for `permanent_skip` entries from prior runs (e.g. `MerchantCategoryCodesServiceImplTest`)
+2. Internal diagnostic logs when called from other paths
 
-**Arquivos afetados:**
-- `java/validator.py` — linhas 236 e 238
+**Affected files:**
+- `java/validator.py` — lines 236 and 238
 
 ---
 
-### Problema 4 — Entradas `permanent_skip` de bugs já corrigidos
+### Problem 4 — `permanent_skip` entries from already-fixed bugs
 
-**Estado atual de `logs/failed_files.json`:**
+**Current state of `logs/failed_files.json`:**
 
-| Arquivo | Fase | Reason/Stack | Bug que corrigiu |
+| File | Phase | Reason/Stack | Bug fixed by |
 |---------|------|-------------|------------------|
-| `BalanceServiceImplTest.java` | `initial_coverage_fix` | `"actual and formal argument lists differ in length"` | Fix **A** (CONSTRUCTOR CALL com tipos) |
-| `MerchantCategoryCodesServiceImplTest.java` | `initial_coverage_fix` | `"INTEGRITY ERROR: O arquivo se chama..."` | Fix **B** (expected_class no repair loop) |
-| `TransactionServiceImpl.java` | `solid-dip` | `compile_failed` | Investigação necessária (não é teste) |
+| `BalanceServiceImplTest.java` | `initial_coverage_fix` | `"actual and formal argument lists differ in length"` | Fix **A** (CONSTRUCTOR CALL with types) |
+| `MerchantCategoryCodesServiceImplTest.java` | `initial_coverage_fix` | `"INTEGRITY ERROR: O arquivo se chama..."` | Fix **B** (expected_class in repair loop) |
+| `TransactionServiceImpl.java` | `solid-dip` | `compile_failed` | Investigation needed (not a test file) |
 
-**Root cause:** `_AUTO_EXPIRE_STACK_PATTERNS` em `refactor.py:508` só contém `"com.example"`. O método `reset()` verifica apenas o campo `stack_trace`. Entradas sem `stack_trace` (como `MerchantCategoryCodesServiceImplTest`) nunca expiram.
+**Root cause:** `_AUTO_EXPIRE_STACK_PATTERNS` in `refactor.py:508` only contains `"com.example"`. The `reset()` method checks only the `stack_trace` field. Entries without `stack_trace` (like `MerchantCategoryCodesServiceImplTest`) never expire.
 
 **Gaps:**
-1. Padrão para construtor mismatch ausente (`"actual and formal argument lists differ in length"`)
-2. Padrão para integrity error PT ausente (`"O arquivo se chama"`)
-3. `reset()` checa apenas `stack_trace`, não `reason`
+1. Pattern for constructor mismatch missing (`"actual and formal argument lists differ in length"`)
+2. Pattern for Portuguese integrity error missing (`"O arquivo se chama"`)
+3. `reset()` checks only `stack_trace`, not `reason`
 
-**Arquivos afetados:**
-- `java/refactor.py` — `_AUTO_EXPIRE_STACK_PATTERNS` (~linha 508) e método `reset()` em `FailedFilesTracker` (~linha 600)
+**Affected files:**
+- `java/refactor.py` — `_AUTO_EXPIRE_STACK_PATTERNS` (~line 508) and `reset()` method in `FailedFilesTracker` (~line 600)
 
 ---
 
-## Mapa de Arquivos
+## File Map
 
-| Arquivo | Mudança |
+| File | Change |
 |---------|---------|
-| `soul.md` | Traduzir de PT → EN (Task 2) |
-| `java/refactor.py` | 4 mudanças: `_JDK_IMPORT_MAP` + regra preventiva Timestamp + handler `_categorize_build_error` + `_AUTO_EXPIRE_STACK_PATTERNS` + `reset()` |
-| `java/validator.py` | 2 mensagens PT → EN (Task 3) |
+| `soul.md` | Translate PT → EN (Task 2) |
+| `java/refactor.py` | 4 changes: `_JDK_IMPORT_MAP` + Timestamp preventive rule + `_categorize_build_error` handler + `_AUTO_EXPIRE_STACK_PATTERNS` + `reset()` |
+| `java/validator.py` | 2 Portuguese messages → English (Task 3) |
 
 ---
 
-## Task 1: Fixes para `java.sql.Timestamp` (Problema 1)
+## Task 1: Fixes for `java.sql.Timestamp` (Problem 1)
 
 **Files:**
 - Modify: `java/refactor.py:52-78` (`_JDK_IMPORT_MAP`)
-- Modify: `java/refactor.py:1490-1500` (bloco BigDecimal na seção `active_rules`)
+- Modify: `java/refactor.py:1490-1500` (BigDecimal block in `active_rules` section)
 - Modify: `java/refactor.py:140-240` (`_categorize_build_error`)
 
-### Fix 1a — Adicionar `Timestamp` ao `_JDK_IMPORT_MAP`
+### Fix 1a — Add `Timestamp` to `_JDK_IMPORT_MAP`
 
-- [ ] **Step 1: Localizar o bloco `_JDK_IMPORT_MAP`**
+- [ ] **Step 1: Locate the `_JDK_IMPORT_MAP` block**
 
-Abrir `java/refactor.py` e localizar o dict que começa em ~linha 52:
+Open `java/refactor.py` and locate the dict starting at ~line 52:
 ```python
 _JDK_IMPORT_MAP: dict[str, str] = {
     "BigDecimal":    "import java.math.BigDecimal;",
@@ -132,32 +132,32 @@ _JDK_IMPORT_MAP: dict[str, str] = {
 }
 ```
 
-- [ ] **Step 2: Adicionar entrada `Timestamp`**
+- [ ] **Step 2: Add `Timestamp` entry**
 
-Inserir logo após a entrada `"Period"`:
+Insert immediately after the `"Period"` entry:
 ```python
     "Timestamp":     "import java.sql.Timestamp;",
     "Date":          "import java.util.Date;",
 ```
-**Razão:** `_auto_inject_missing_imports` consulta este mapa. Sem a entrada, testes com `Timestamp` ficam sem o import e a geração falha antes mesmo do formato errado se manifestar.
+**Reason:** `_auto_inject_missing_imports` consults this map. Without the entry, tests with `Timestamp` are missing the import and generation fails even before the wrong format manifests.
 
-- [ ] **Step 3: Verificar que não há teste unitário quebrado por esta adição**
+- [ ] **Step 3: Verify no unit tests are broken by this addition**
 
-Rodar (no venv ativado, Java 22):
+Run (with venv activated, Java 22):
 ```bash
 cd /home/emerson/Área\ de\ trabalho/ai-refactor-agent && python -m pytest tests/ -q -k "import" 2>&1 | tail -20
 ```
-Esperado: zero failures relacionados ao mapa de imports.
+Expected: zero failures related to the import map.
 
 ---
 
-### Fix 1b — Regra preventiva em `active_rules`
+### Fix 1b — Preventive rule in `active_rules`
 
-- [ ] **Step 4: Localizar o bloco de regra BigDecimal em `active_rules`**
+- [ ] **Step 4: Locate the BigDecimal rule block in `active_rules`**
 
-Em `java/refactor.py`, localizar o bloco que começa com (~ linha 1491):
+In `java/refactor.py`, locate the block starting with (~ line 1491):
 ```python
-        # C: regra preventiva — quando a classe de produção declara campos BigDecimal
+        # C: preventive rule — when the production class declares BigDecimal fields
         if re.search(r'\bBigDecimal\b', original):
             active_rules += (
                 "\n\n### BIGDECIMAL CONSTRUCTION (MANDATORY — VIOLATION CAUSES COMPILE FAILURE)\n"
@@ -165,11 +165,11 @@ Em `java/refactor.py`, localizar o bloco que começa com (~ linha 1491):
             )
 ```
 
-- [ ] **Step 5: Adicionar bloco de regra `java.sql.Timestamp` IMEDIATAMENTE APÓS o bloco BigDecimal**
+- [ ] **Step 5: Add `java.sql.Timestamp` rule block IMMEDIATELY AFTER the BigDecimal block**
 
 ```python
-        # F (Timestamp): regra preventiva — quando a classe usa java.sql.Timestamp
-        # Timestamp.valueOf() exige formato "yyyy-mm-dd hh:mm:ss" (espaço, não T ISO).
+        # F (Timestamp): preventive rule — when the class uses java.sql.Timestamp
+        # Timestamp.valueOf() requires format "yyyy-mm-dd hh:mm:ss" (space, not ISO T).
         if re.search(r'\bjava\.sql\.Timestamp\b', original) or \
            (re.search(r'\bTimestamp\b', original) and 'import java.sql.Timestamp' in original):
             active_rules += (
@@ -184,38 +184,38 @@ Em `java/refactor.py`, localizar o bloco que começa com (~ linha 1491):
             )
 ```
 
-- [ ] **Step 6: Verificar que a detecção funciona para `TransactionDocument.java`**
+- [ ] **Step 6: Verify detection works for `TransactionDocument.java`**
 
-Teste manual rápido no Python REPL:
+Quick manual test in Python REPL:
 ```python
 import re
 original = open("repos/card-transaction-authorizer/src/main/java/com/caju/transactionauthorizer/document/TransactionDocument.java").read()
 print(bool(re.search(r'\bjava\.sql\.Timestamp\b', original)))
-# Deve imprimir: False  (o import é java.sql.Timestamp mas sem o pacote no corpo)
+# Expected: False  (the import is java.sql.Timestamp but without the package in the body)
 print('import java.sql.Timestamp' in original)
-# Deve imprimir: True
+# Expected: True
 print(bool(re.search(r'\bTimestamp\b', original)))
-# Deve imprimir: True
+# Expected: True
 ```
-Resultado esperado: a condição `re.search(r'\bTimestamp\b', original) and 'import java.sql.Timestamp' in original` é `True` → regra injetada.
+Expected result: the condition `re.search(r'\bTimestamp\b', original) and 'import java.sql.Timestamp' in original` is `True` → rule injected.
 
 ---
 
-### Fix 1c — Handler em `_categorize_build_error`
+### Fix 1c — Handler in `_categorize_build_error`
 
-- [ ] **Step 7: Localizar o início da função `_categorize_build_error`**
+- [ ] **Step 7: Locate the start of `_categorize_build_error`**
 
-Em `java/refactor.py`, função `_categorize_build_error` (~linha 140). Localizar o primeiro bloco `if`:
+In `java/refactor.py`, function `_categorize_build_error` (~line 140). Locate the first `if` block:
 ```python
-    # Erro de construtor de record (detectar ANTES de cannot find symbol)
+    # Record constructor error (detect BEFORE cannot find symbol)
     if "constructor" in out and "in record" in out ...
 ```
 
-- [ ] **Step 8: Inserir handler `IllegalArgumentException` + Timestamp ANTES do primeiro bloco `if`**
+- [ ] **Step 8: Insert `IllegalArgumentException` + Timestamp handler BEFORE the first `if` block**
 
-O handler deve ser o PRIMEIRO verificado pois `IllegalArgumentException` pode co-ocorrer com outras strings:
+The handler must be the FIRST checked since `IllegalArgumentException` can co-occur with other strings:
 ```python
-    # F: IllegalArgumentException com mensagem de formato Timestamp
+    # F: IllegalArgumentException with Timestamp format message
     if "illegalargument" in out and "timestamp format" in out:
         return (
             "TIMESTAMP FORMAT ERROR: java.sql.Timestamp.valueOf() received an invalid format string.\n"
@@ -228,9 +228,9 @@ O handler deve ser o PRIMEIRO verificado pois `IllegalArgumentException` pode co
         )
 ```
 
-- [ ] **Step 9: Verificar que o handler está posicionado ANTES do bloco `if "constructor" in out...`**
+- [ ] **Step 9: Verify the handler is positioned BEFORE the `if "constructor" in out...` block**
 
-Ler as primeiras 10 linhas da função após a inserção para confirmar a ordem.
+Read the first 10 lines of the function after insertion to confirm the order.
 
 - [ ] **Step 10: Commit**
 
@@ -250,18 +250,18 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
 
 ---
 
-## Task 2: Traduzir `soul.md` para Inglês (Problema 2)
+## Task 2: Translate `soul.md` to English (Problem 2)
 
 **Files:**
-- Modify: `soul.md` (raiz do projeto)
+- Modify: `soul.md` (project root)
 
-**Contexto:** `soul.md` é carregado uma única vez em `ai/prompt.py:23` como `_SOUL` e injetado no início de TODOS os prompts (refatoração e geração de testes). Qualquer LLM que receba um prompt do pipeline lê primeiro o soul. Ter o soul em PT enquanto todo o resto está em EN cria ambiguidade de idioma para o modelo.
+**Context:** `soul.md` is loaded once in `ai/prompt.py:23` as `_SOUL` and injected at the start of ALL prompts (refactoring and test generation). Any LLM receiving a prompt from the pipeline reads the soul first. Having the soul in Portuguese while everything else is in English creates language ambiguity for the model.
 
-**Regra crítica:** NÃO adicionar blocos ` ```java ` no soul.md — quebraria o teste `test_no_java_example_block_in_prompt`. Manter apenas texto prosa.
+**Critical rule:** Do NOT add ` ```java ` blocks to soul.md — it would break the `test_no_java_example_block_in_prompt` test. Keep only prose text.
 
-- [ ] **Step 1: Traduzir `soul.md` para Inglês mantendo 100% do conteúdo**
+- [ ] **Step 1: Translate `soul.md` to English keeping 100% of the content**
 
-Substituir o arquivo `soul.md` pela versão abaixo (mesmas seções, mesmas regras, mesmo tom, em Inglês):
+Replace the `soul.md` file with the version below (same sections, same rules, same tone, in English):
 
 ```markdown
 # SOUL — Java Refactoring Agent Identity
@@ -331,34 +331,34 @@ Never truncate the file with "// rest of code..." or similar.
 The file you return replaces the original file — it must be 100% complete and compilable.
 ```
 
-- [ ] **Step 2: Verificar que não há bloco java no novo soul.md**
+- [ ] **Step 2: Verify no java block in new soul.md**
 
 ```bash
 grep -c '```java' /home/emerson/Área\ de\ trabalho/ai-refactor-agent/soul.md
 ```
-Esperado: `0`
+Expected: `0`
 
-- [ ] **Step 3: Verificar que o soul ainda é carregado corretamente**
+- [ ] **Step 3: Verify soul is still loaded correctly**
 
 ```bash
 cd /home/emerson/Área\ de\ trabalho/ai-refactor-agent
 python -c "
 from ai.prompt import _SOUL
-assert len(_SOUL) > 100, 'soul vazio'
-assert 'never invent' in _SOUL.lower() or 'Never invent' in _SOUL, 'conteúdo ausente'
-assert 'Você' not in _SOUL, 'Português ainda presente'
-print('OK:', len(_SOUL), 'chars, idioma: EN')
+assert len(_SOUL) > 100, 'soul is empty'
+assert 'never invent' in _SOUL.lower() or 'Never invent' in _SOUL, 'content missing'
+assert 'Você' not in _SOUL, 'Portuguese still present'
+print('OK:', len(_SOUL), 'chars, language: EN')
 "
 ```
-Esperado: `OK: NNN chars, idioma: EN`
+Expected: `OK: NNN chars, language: EN`
 
-- [ ] **Step 4: Rodar suite de testes relacionados ao prompt**
+- [ ] **Step 4: Run prompt-related tests**
 
 ```bash
 cd /home/emerson/Área\ de\ trabalho/ai-refactor-agent
 python -m pytest tests/ -q -k "prompt or soul" 2>&1 | tail -20
 ```
-Esperado: todos passando, especialmente `test_no_java_example_block_in_prompt`.
+Expected: all passing, especially `test_no_java_example_block_in_prompt`.
 
 - [ ] **Step 5: Commit**
 
@@ -374,44 +374,44 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
 
 ---
 
-## Task 3: Traduzir mensagens PT em `validator.py` (Problema 3)
+## Task 3: Translate Portuguese messages in `validator.py` (Problem 3)
 
 **Files:**
-- Modify: `java/validator.py:236` e `java/validator.py:238`
+- Modify: `java/validator.py:236` and `java/validator.py:238`
 
-- [ ] **Step 1: Localizar e substituir as duas mensagens em `validate_class_name_matches_file`**
+- [ ] **Step 1: Locate and replace the two messages in `validate_class_name_matches_file`**
 
-Arquivo: `java/validator.py`
+File: `java/validator.py`
 
-**Linha 236** — substituir:
+**Line 236** — replace:
 ```python
         return False, f"O arquivo se chama '{file_name}.java' mas você gerou a classe '{found_name}'."
 ```
-Por:
+With:
 ```python
         return False, f"File is named '{file_name}.java' but generated class is '{found_name}'."
 ```
 
-**Linha 238** — substituir:
+**Line 238** — replace:
 ```python
     return False, f"Não foi encontrada a classe '{file_name}' no código gerado."
 ```
-Por:
+With:
 ```python
     return False, f"Class '{file_name}' not found in the generated code."
 ```
 
-- [ ] **Step 2: Verificar que as mensagens novas seguem o padrão das outras mensagens do validador**
+- [ ] **Step 2: Verify new messages follow the pattern of other validator messages**
 
-Confirmar que `check_syntax` ainda usa mensagens em inglês (`"Syntax error:"`, `"Parse failed:"`).
+Confirm that `check_syntax` still uses English messages (`"Syntax error:"`, `"Parse failed:"`).
 
-- [ ] **Step 3: Rodar testes do validator**
+- [ ] **Step 3: Run validator tests**
 
 ```bash
 cd /home/emerson/Área\ de\ trabalho/ai-refactor-agent
 python -m pytest tests/ -q -k "validator or class_name or package" 2>&1 | tail -20
 ```
-Esperado: todos passando.
+Expected: all passing.
 
 - [ ] **Step 4: Commit**
 
@@ -427,35 +427,35 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
 
 ---
 
-## Task 4: Expirar `permanent_skip` de bugs já corrigidos (Problema 4)
+## Task 4: Expire `permanent_skip` entries from already-fixed bugs (Problem 4)
 
 **Files:**
 - Modify: `java/refactor.py:508-510` (`_AUTO_EXPIRE_STACK_PATTERNS`)
-- Modify: `java/refactor.py` — método `reset()` de `FailedFilesTracker` (~linha 600)
+- Modify: `java/refactor.py` — `reset()` method in `FailedFilesTracker` (~line 600)
 
-**Contexto dos arquivos bloqueados:**
+**Context of blocked files:**
 
-| Arquivo | Campo com padrão detectável | Bug corrigido por |
+| File | Field with detectable pattern | Fixed by |
 |---------|-----------------------------|-------------------|
-| `BalanceServiceImplTest.java` | `stack_trace`: `"actual and formal argument lists differ in length"` | Fix A (CONSTRUCTOR CALL com tipos) |
-| `MerchantCategoryCodesServiceImplTest.java` | `reason`: `"O arquivo se chama"` (mensagem PT — impossível após fix B) | Fix B (expected_class no repair loop) |
+| `BalanceServiceImplTest.java` | `stack_trace`: `"actual and formal argument lists differ in length"` | Fix A (CONSTRUCTOR CALL with types) |
+| `MerchantCategoryCodesServiceImplTest.java` | `reason`: `"O arquivo se chama"` (Portuguese message — impossible after fix B) | Fix B (expected_class in repair loop) |
 
-**Nota sobre `TransactionServiceImpl.java`:** Está em `solid-dip`, não em geração de testes. É um arquivo de produção complexo. **Não adicionar** auto-expire para `compile_failed` genérico — seria perigoso. Este arquivo merece investigação manual separada.
+**Note on `TransactionServiceImpl.java`:** It is in `solid-dip`, not in test generation. It is a complex production file. **Do not add** auto-expire for generic `compile_failed` — that would be dangerous. This file deserves a separate manual investigation.
 
-### Fix 4a — Expandir `_AUTO_EXPIRE_STACK_PATTERNS` e cobrir campo `reason`
+### Fix 4a — Expand `_AUTO_EXPIRE_STACK_PATTERNS` and cover `reason` field
 
-- [ ] **Step 1: Localizar `_AUTO_EXPIRE_STACK_PATTERNS`**
+- [ ] **Step 1: Locate `_AUTO_EXPIRE_STACK_PATTERNS`**
 
-Em `java/refactor.py`, localizar (~linha 508):
+In `java/refactor.py`, locate (~line 508):
 ```python
 _AUTO_EXPIRE_STACK_PATTERNS = [
-    "com.example",  # F2 Package Guard: LLM escrevia package errado; corrigido deterministicamente
+    "com.example",  # F2 Package Guard: LLM wrote wrong package; fixed deterministically
 ]
 ```
 
-- [ ] **Step 2: Adicionar novos padrões**
+- [ ] **Step 2: Add new patterns**
 
-Substituir por:
+Replace with:
 ```python
 _AUTO_EXPIRE_STACK_PATTERNS = [
     "com.example",              # F2 Package Guard: package hallucination no longer possible
@@ -464,9 +464,9 @@ _AUTO_EXPIRE_STACK_PATTERNS = [
 ]
 ```
 
-- [ ] **Step 3: Localizar o método `reset()` em `FailedFilesTracker`**
+- [ ] **Step 3: Locate the `reset()` method in `FailedFilesTracker`**
 
-Localizar o trecho que faz a verificação de `permanent_skip` (~ linha 600):
+Locate the block that checks `permanent_skip` (~ line 600):
 ```python
 for entry in ...:
     if entry.get("permanent_skip"):
@@ -475,22 +475,22 @@ for entry in ...:
             ...
 ```
 
-- [ ] **Step 4: Estender a verificação para incluir o campo `reason`**
+- [ ] **Step 4: Extend the check to include the `reason` field**
 
-O campo `MerchantCategoryCodesServiceImplTest` tem o padrão em `reason`, não em `stack_trace`. Substituir a linha:
+The `MerchantCategoryCodesServiceImplTest` file has the pattern in `reason`, not in `stack_trace`. Replace the line:
 ```python
         st = entry.get("stack_trace", "")
 ```
-Por:
+With:
 ```python
         st = (entry.get("stack_trace") or "") + " " + (entry.get("reason") or "")
 ```
-Esta alteração de uma linha garante que os padrões são verificados nos dois campos, sem mudar qualquer outra lógica.
+This one-line change ensures patterns are checked in both fields, without changing any other logic.
 
-- [ ] **Step 5: Verificar com teste manual o comportamento**
+- [ ] **Step 5: Verify behavior with a manual test**
 
 ```python
-# Simular no Python REPL
+# Simulate in Python REPL
 import json, sys
 sys.path.insert(0, '/home/emerson/Área de trabalho/ai-refactor-agent')
 from java.refactor import _AUTO_EXPIRE_STACK_PATTERNS
@@ -500,24 +500,24 @@ for e in entries:
     if e.get('permanent_skip'):
         st = (e.get('stack_trace') or '') + ' ' + (e.get('reason') or '')
         match = next((p for p in _AUTO_EXPIRE_STACK_PATTERNS if p in st), None)
-        print(f"{e['file'].split('/')[-1]}: {'EXPIRA' if match else 'PERMANECE'} ({match or 'sem padrão'})")
+        print(f"{e['file'].split('/')[-1]}: {'EXPIRES' if match else 'REMAINS'} ({match or 'no pattern'})")
 ```
 
-Resultado esperado:
+Expected result:
 ```
-TransactionServiceImpl.java: PERMANECE (sem padrão)
-MerchantCategoryCodesServiceImplTest.java: EXPIRA (O arquivo se chama)
-BalanceServiceImplTest.java: EXPIRA (actual and formal argument lists differ in length)
-BalanceDocumentTest.java: PERMANECE (sem padrão)   # prev_run=True, não permanent_skip=True
+TransactionServiceImpl.java: REMAINS (no pattern)
+MerchantCategoryCodesServiceImplTest.java: EXPIRES (O arquivo se chama)
+BalanceServiceImplTest.java: EXPIRES (actual and formal argument lists differ in length)
+BalanceDocumentTest.java: REMAINS (no pattern)   # prev_run=True, not permanent_skip=True
 ```
 
-- [ ] **Step 6: Rodar testes relacionados ao FailedFilesTracker**
+- [ ] **Step 6: Run FailedFilesTracker-related tests**
 
 ```bash
 cd /home/emerson/Área\ de\ trabalho/ai-refactor-agent
 python -m pytest tests/ -q -k "failed_files or tracker or expire or skip" 2>&1 | tail -20
 ```
-Esperado: todos passando.
+Expected: all passing.
 
 - [ ] **Step 7: Commit**
 
@@ -538,45 +538,45 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
 
 ---
 
-## Task 5 (Investigação): `TransactionServiceImpl.java` — solid-dip bloqueado
+## Task 5 (Investigation): `TransactionServiceImpl.java` — solid-dip blocked
 
 **Files:**
 - Read: `repos/card-transaction-authorizer/src/main/java/.../TransactionServiceImpl.java`
 
-Este arquivo está em `permanent_skip` com `solid-dip compile_failed`. Não é geração de testes — é refatoração de produção. **Não adicionar auto-expire** sem entender o erro.
+This file is in `permanent_skip` with `solid-dip compile_failed`. It is not test generation — it is production refactoring. **Do not add auto-expire** without understanding the error.
 
-- [ ] **Step 1: Ler o arquivo de produção atual**
+- [ ] **Step 1: Read the current production file**
 
 ```bash
 cat "repos/card-transaction-authorizer/src/main/java/com/caju/transactionauthorizer/service/impl/TransactionServiceImpl.java"
 ```
 
-- [ ] **Step 2: Entender por que solid-dip falhou**
+- [ ] **Step 2: Understand why solid-dip failed**
 
-O `stack_trace` em `failed_files.json` apenas diz `compile_failed`. Para saber o erro real, verificar `execution.log` de runs anteriores ou executar manualmente o solid-dip nesse arquivo isoladamente.
+The `stack_trace` in `failed_files.json` only says `compile_failed`. To know the actual error, check `execution.log` from previous runs or run the solid-dip manually on this file in isolation.
 
-- [ ] **Step 3: Decidir a ação**
+- [ ] **Step 3: Decide the action**
 
-Opções:
-- **A) Adicionar à blocklist permanente** (`_BOOTSTRAP_RE` ou `_SKIP_PATTERNS`) se o arquivo tiver estrutura que solid-dip não consegue processar (ex: generics complexos, múltiplas interfaces).
-- **B) Corrigir o bug de solid-dip** para esse padrão específico.
-- **C) Deixar em `permanent_skip`** se o arquivo já está bem estruturado e DIP não é necessário.
+Options:
+- **A) Add to permanent blocklist** (`_BOOTSTRAP_RE` or `_SKIP_PATTERNS`) if the file has a structure that solid-dip cannot process (e.g. complex generics, multiple interfaces).
+- **B) Fix the solid-dip bug** for this specific pattern.
+- **C) Leave in `permanent_skip`** if the file is already well-structured and DIP is not needed.
 
-Esta task não gera commit sozinha — o resultado alimenta a decisão de um fix adicional se necessário.
+This task does not generate its own commit — the result feeds the decision for an additional fix if necessary.
 
 ---
 
 ## Self-Review
 
 **Spec coverage:**
-- ✅ Problema 1 (Timestamp) → Task 1 (3 fixes: import map, preventive rule, repair handler)
-- ✅ Problema 2 (soul PT) → Task 2 (tradução completa)
-- ✅ Problema 3 (validator PT) → Task 3 (2 mensagens)
-- ✅ Problema 4 (permanent_skip) → Task 4 (patterns + reset() fix)
-- ✅ TransactionServiceImpl → Task 5 (investigação)
+- ✅ Problem 1 (Timestamp) → Task 1 (3 fixes: import map, preventive rule, repair handler)
+- ✅ Problem 2 (soul Portuguese) → Task 2 (complete translation)
+- ✅ Problem 3 (validator Portuguese) → Task 3 (2 messages)
+- ✅ Problem 4 (permanent_skip) → Task 4 (patterns + reset() fix)
+- ✅ TransactionServiceImpl → Task 5 (investigation)
 
-**Placeholder scan:** nenhum TODO/TBD presente; todos os code blocks contêm código real.
+**Placeholder scan:** no TODO/TBD present; all code blocks contain real code.
 
-**Type consistency:** os campos `stack_trace` e `reason` em `failed_files.json` são strings; a concatenação com `" "` é segura para os padrões de substring matching usados.
+**Type consistency:** the `stack_trace` and `reason` fields in `failed_files.json` are strings; concatenation with `" "` is safe for the substring matching patterns used.
 
-**Ordem de execução recomendada:** Task 1 → Task 2 → Task 3 → Task 4 → Task 5. Tasks 2 e 3 são independentes e podem ser feitas em paralelo. Task 4 depende de nenhuma outra (os padrões funcionam independentemente da tradução). Task 1 é a mais urgente (erro ativo agora).
+**Recommended execution order:** Task 1 → Task 2 → Task 3 → Task 4 → Task 5. Tasks 2 and 3 are independent and can be done in parallel. Task 4 depends on nothing (the patterns work regardless of the translation). Task 1 is the most urgent (active error now).

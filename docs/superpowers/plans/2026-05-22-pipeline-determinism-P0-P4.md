@@ -195,7 +195,7 @@ public class Tx {
 - [ ] **Step 5: Integrate into `generate_tests`** in `java/refactor.py`. Insert AFTER `_test_pkg` is computed (~line 1405) and BEFORE `_mandatory_prefix` is built (~line 1407):
 
 ```python
-        # P0: data holders são testados deterministicamente — sem LLM, sem repair loop.
+        # P0: data holders are tested deterministically — no LLM, no repair loop.
         if not complement_mode:
             from java.data_holder_test_gen import is_pure_data_holder, generate_data_holder_test
             if is_pure_data_holder(original):
@@ -205,14 +205,14 @@ public class Tx {
                     write_file(test_path, _dh_test)
                     _dh_ok, _dh_out, _dh_cov, _ = maven_test_with_coverage(repo_path, file_name)
                     if _dh_ok:
-                        log(f"  {test_name} CRIADO (determinístico, sem LLM) ✓", "OK")
+                        log(f"  {test_name} CREATED (deterministic, no LLM) ✓", "OK")
                         reporter.record_changed(phase, test_name, test_path, "", _dh_test)
                         if exec_logger:
                             exec_logger.log_file_accepted(phase, test_name, "+test")
                             exec_logger.log_model_used(phase, test_name, "deterministic", "ACCEPTED")
                         any_changed = True
                         continue
-                    log(f"  {test_name}: gerador determinístico falhou no build — fallback para LLM", "WARN")
+                    log(f"  {test_name}: deterministic generator failed on build — falling back to LLM", "WARN")
                     os.remove(test_path)
 ```
 

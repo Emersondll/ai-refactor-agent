@@ -1,68 +1,68 @@
-# Design: Cache Layer + Prompt Decomposition (Opção B)
+# Design: Cache Layer + Prompt Decomposition (Option B)
 
-**Data:** 2026-05-12  
-**Status:** Aprovado  
-**Objetivo:** Reduzir 55–65% do consumo de tokens do agente sem reduzir qualidade de refatoração  
-**Escopo:** Projetos Java de 50–200 arquivos rodando via Ollama local
-
----
-
-## Contexto
-
-O agente atual sofre com alto consumo de tokens por três razões principais:
-
-1. `_polish_result()` em `model.py` dobra o consumo na maioria das chamadas bem-sucedidas (toda chamada não-ultimate dispara uma segunda chamada ao modelo 14B)
-2. `get_dependency_context()` em `java/context.py` executa `os.walk()` completo do projeto por arquivo por fase, sem nenhum cache (1200 walks para 100 arquivos × 12 fases)
-3. Prompts contêm ~400 tokens de constantes idênticas repetidas em toda chamada, e as fases `.md` repetem regras já presentes no template base
-
-Não há detecção de mudança entre fases: arquivos não alterados são reprocessados por todas as fases subsequentes.
+**Date:** 2026-05-12  
+**Status:** Approved  
+**Objective:** Reduce 55–65% of the agent's token consumption without reducing refactoring quality  
+**Scope:** Java projects of 50–200 files running via local Ollama
 
 ---
 
-## Arquitetura Alvo
+## Context
+
+The current agent suffers from high token consumption for three main reasons:
+
+1. `_polish_result()` in `model.py` doubles consumption on most successful calls (every non-ultimate call fires a second call to the 14B model)
+2. `get_dependency_context()` in `java/context.py` runs a complete `os.walk()` of the project per file per phase, with no caching (1200 walks for 100 files × 12 phases)
+3. Prompts contain ~400 tokens of identical constants repeated on every call, and phase `.md` files repeat rules already present in the base template
+
+There is no change detection between phases: unmodified files are reprocessed by all subsequent phases.
+
+---
+
+## Target Architecture
 
 ```
 ai-refactor-agent/
-├── memory/                         ← NOVO módulo
+├── memory/                         ← NEW module
 │   ├── __init__.py
-│   ├── cache.py                    # Motor de cache: hash → JSON em disco
-│   ├── summaries.py                # Lê/grava class summaries
-│   └── project_dict.py             # Singleton do project dictionary
+│   ├── cache.py                    # Cache engine: hash → JSON on disk
+│   ├── summaries.py                # Reads/writes class summaries
+│   └── project_dict.py             # Project dictionary singleton
 │
 ├── ai/
-│   ├── prompt.py                   # MODIFICADO: BASE_CONSTRAINTS + build_prompt()
-│   └── model.py                    # MODIFICADO: _polish_result() condicional
+│   ├── prompt.py                   # MODIFIED: BASE_CONSTRAINTS + build_prompt()
+│   └── model.py                    # MODIFIED: _polish_result() conditional
 │
 ├── java/
-│   ├── context.py                  # MODIFICADO: cache-first, fallback p/ geração
-│   └── refactor.py                 # MODIFICADO: skip por hash, injeta cache
+│   ├── context.py                  # MODIFIED: cache-first, fallback to generation
+│   └── refactor.py                 # MODIFIED: skip by hash, injects cache
 │
 ├── phases/
-│   ├── _base_rules.md              ← NOVO: regras globais (lidas uma vez por run)
-│   └── {categoria}/*.md            # Apenas delta por fase (mais curtos)
+│   ├── _base_rules.md              ← NEW: global rules (read once per run)
+│   └── {category}/*.md             # Phase delta only (shorter files)
 │
-└── .refactor_cache/                ← GERADO em runtime (no .gitignore)
+└── .refactor_cache/                ← GENERATED at runtime (in .gitignore)
     └── {repo_hash}/
-        ├── dict.json               # Project dictionary persistido
+        ├── dict.json               # Persisted project dictionary
         └── classes/
-            └── {file_hash}.json    # Summary + dep_context compacto por arquivo
+            └── {file_hash}.json    # Summary + compact dep_context per file
 ```
 
-### Componentes inalterados
+### Unchanged components
 
-`scope_reducer.py`, `validator.py`, `compiler.py`, `flow.py`, `impact.py`, `agent_router.py`, `sanitizer.py` (java/), toda lógica de rollback/revert, `call_ai_with_correction()`, estrutura principal do `main.py`.
+`scope_reducer.py`, `validator.py`, `compiler.py`, `flow.py`, `impact.py`, `agent_router.py`, `sanitizer.py` (java/), all rollback/revert logic, `call_ai_with_correction()`, main structure of `main.py`.
 
 ---
 
-## Componente 1: `memory/cache.py`
+## Component 1: `memory/cache.py`
 
-**Responsabilidade:** Persistir e recuperar entradas de cache indexadas por hash de conteúdo de arquivo.
+**Responsibility:** Persist and retrieve cache entries indexed by file content hash.
 
-**Chave de cache:** `sha256(file_content.encode()).hexdigest()[:12]` — determinística, sem dependência de path ou timestamp.
+**Cache key:** `sha256(file_content.encode()).hexdigest()[:12]` — deterministic, no path or timestamp dependency.
 
-**`repo_hash`** (nome do diretório raiz do cache): `sha256(os.path.abspath(repo_path).encode()).hexdigest()[:8]`
+**`repo_hash`** (root directory name of the cache): `sha256(os.path.abspath(repo_path).encode()).hexdigest()[:8]`
 
-**Função helper compartilhada** (em `memory/cache.py`, importada onde necessário):
+**Shared helper function** (in `memory/cache.py`, imported where needed):
 ```python
 import hashlib
 
@@ -70,7 +70,7 @@ def _sha(content: str) -> str:
     return hashlib.sha256(content.encode()).hexdigest()[:12]
 ```
 
-**Schema do entry em disco** (`.refactor_cache/{repo_hash}/classes/{file_hash}.json`):
+**Entry schema on disk** (`.refactor_cache/{repo_hash}/classes/{file_hash}.json`):
 
 ```json
 {
@@ -84,38 +84,38 @@ def _sha(content: str) -> str:
 }
 ```
 
-**API pública:**
+**Public API:**
 
 ```python
 class Cache:
     def __init__(self, repo_path: str): ...
 
-    # Entradas por arquivo (summary + fases)
+    # Per-file entries (summary + phases)
     def get(self, file_path: str) -> dict | None: ...
     def set(self, file_path: str, data: dict) -> None: ...
 
-    # Dep context indexado por file_hash
+    # Dep context indexed by file_hash
     def get_dep_context(self, file_hash: str) -> str | None: ...
     def set_dep_context(self, file_hash: str, context: str) -> None: ...
 
-    # Controle de fases por arquivo
+    # Phase control per file
     def mark_phase_done(self, file_path: str, phase_name: str,
                         output_hash: str) -> None: ...
     def is_phase_done(self, file_path: str, phase_name: str,
                       current_hash: str) -> bool: ...
 
-    # Project dictionary persistido
+    # Persisted project dictionary
     def load_dict(self) -> str | None: ...
     def save_dict(self, content: str) -> None: ...
 ```
 
-**`is_phase_done` logic:** Retorna `True` apenas se `phase_name` está em `processed_phases` E o hash do conteúdo atual do arquivo bate com o `last_output_hash` gravado. Isso garante que arquivos revertidos (rollback) não sejam considerados processados.
+**`is_phase_done` logic:** Returns `True` only if `phase_name` is in `processed_phases` AND the hash of the current file content matches the `last_output_hash` stored. This ensures that reverted files (rollback) are not considered processed.
 
 ---
 
-## Componente 2: `memory/project_dict.py`
+## Component 2: `memory/project_dict.py`
 
-**Responsabilidade:** Singleton do project dictionary — construído uma vez por run, persistido em disco entre runs do mesmo repo.
+**Responsibility:** Project dictionary singleton — built once per run, persisted to disk between runs of the same repo.
 
 ```python
 _DICT_CACHE: str | None = None
@@ -124,12 +124,12 @@ def get_project_dictionary(repo_path: str, cache: Cache) -> str:
     global _DICT_CACHE
     if _DICT_CACHE is not None:
         return _DICT_CACHE
-    # Tenta ler do disco
+    # Try to read from disk
     persisted = cache.load_dict()
     if persisted:
         _DICT_CACHE = persisted
         return _DICT_CACHE
-    # Gera e persiste
+    # Generate and persist
     _DICT_CACHE = _build_dict(repo_path)
     cache.save_dict(_DICT_CACHE)
     return _DICT_CACHE
@@ -139,15 +139,15 @@ def reset():
     _DICT_CACHE = None
 ```
 
-`reset()` é chamado em `main.py` ao iniciar nova run (novo repo ou nova execução).
+`reset()` is called in `main.py` when starting a new run (new repo or new execution).
 
 ---
 
-## Componente 3: `ai/prompt.py` — BASE + PHASE_DELTA
+## Component 3: `ai/prompt.py` — BASE + PHASE_DELTA
 
-**Problema:** ~400 tokens de constantes (constraints, output format, example) repetidos em toda chamada.
+**Problem:** ~400 tokens of constants (constraints, output format, example) repeated on every call.
 
-**Solução:** Separar em constante global + função de composição.
+**Solution:** Separate into global constant + composition function.
 
 ```python
 BASE_CONSTRAINTS = """\
@@ -184,26 +184,26 @@ def build_prompt(code: str, phase_delta: str, mode: str,
     return "\n".join(parts)
 ```
 
-O exemplo de output Java é **removido** — modelos 7B/14B treinados em Java já conhecem o formato ```` ```java ``` ````. O exemplo adicionava ~80 tokens sem ganho mensurável.
+The Java output example is **removed** — 7B/14B models trained on Java already know the ```` ```java ``` ```` format. The example added ~80 tokens with no measurable gain.
 
 ### Phase files: BASE_RULES + DELTA
 
-Arquivo novo: `phases/_base_rules.md` — contém regras que se repetem em todas as fases (não criar novas classes, não alterar assinaturas públicas, não modificar testes, etc.). Carregado uma vez por run em `main.py`.
+New file: `phases/_base_rules.md` — contains rules that repeat across all phases (do not create new classes, preserve public signatures, do not modify tests, etc.). Loaded once per run in `main.py`.
 
-Cada `.md` de fase existente é reduzido para conter apenas:
-- Objetivo específico da fase
-- Regras exclusivas
-- Exemplos BEFORE/AFTER apenas se estritamente necessários para a fase
+Each existing phase `.md` is reduced to contain only:
+- Specific objective of the phase
+- Exclusive rules
+- BEFORE/AFTER examples only if strictly necessary for the phase
 
-Meta: cada fase de 200–300 tokens reduzida para 80–150 tokens.
+Target: each phase reduced from 200–300 tokens to 80–150 tokens.
 
 ---
 
-## Componente 4: `java/context.py` — Cache-First
+## Component 4: `java/context.py` — Cache-First
 
-**Problema:** `get_dependency_context()` faz project walk completo por arquivo por fase.
+**Problem:** `get_dependency_context()` does a full project walk per file per phase.
 
-**Solução:** Cache-first com fallback para geração.
+**Solution:** Cache-first with fallback to generation.
 
 ```python
 def get_dependency_context(file_code: str, repo_path: str,
@@ -217,35 +217,35 @@ def get_dependency_context(file_code: str, repo_path: str,
     return context
 ```
 
-Adicionalmente, `_extract_simplified_header()` é otimizado: remove campos privados, comentários internos, mantém apenas assinaturas de métodos públicos/protegidos. Reduz dep_context de ~400 tokens por dependência para ~80–120 tokens.
+Additionally, `_extract_simplified_header()` is optimized: removes private fields, internal comments, retains only public/protected method signatures. Reduces dep_context from ~400 tokens per dependency to ~80–120 tokens.
 
 ---
 
-## Componente 5: `model.py` — `_polish_result()` Condicional
+## Component 5: `model.py` — Conditional `_polish_result()`
 
-**Problema:** Toda chamada não-ultimate dispara segunda chamada ao modelo 14B.
+**Problem:** Every non-ultimate call fires a second call to the 14B model.
 
-**Solução:** Polimento apenas em fases estruturalmente críticas.
+**Solution:** Polishing only on structurally critical phases.
 
 ```python
 PHASES_REQUIRING_POLISH = {"07_solid", "08_architecture", "09_patterns"}
 
-# Em _run_pipeline():
+# In _run_pipeline():
 phase_name = phase.split("/")[-1].replace(".md", "")
 needs_polish = agent != "ultimate" and phase_name in PHASES_REQUIRING_POLISH
 if needs_polish and MODEL_SOLID not in _OOM_MODELS:
     result = _polish_result(result, prompt, MODEL_SOLID)
 ```
 
-Fases de documentação (01–03), nomenclatura (04–06), clean code (10) e testes (11–12) são determinísticas — não requerem revisão crítica do modelo pesado.
+Documentation phases (01–03), nomenclature (04–06), clean code (10), and tests (11–12) are deterministic — they do not require review from the heavy model.
 
 ---
 
-## Componente 6: `java/refactor.py` — Skip por Fase
+## Component 6: `java/refactor.py` — Phase Skip
 
-**Problema:** Fases subsequentes reprocessam arquivos que não foram modificados.
+**Problem:** Subsequent phases reprocess files that were not modified.
 
-**Solução:** Checar cache antes de cada processamento.
+**Solution:** Check cache before each processing.
 
 ```python
 def refactor_file(file: str, rules: str, repo_path: str, phase: str,
@@ -259,70 +259,70 @@ def refactor_file(file: str, rules: str, repo_path: str, phase: str,
         phase_name = phase.split("/")[-1].replace(".md", "")
         current_hash = _sha(original)
         if cache.is_phase_done(file, phase_name, current_hash):
-            log(f"  {file_name}: cache hit — fase {phase_name} já aplicada", "OK")
+            log(f"  {file_name}: cache hit — phase {phase_name} already applied", "OK")
             reporter.record_skipped(phase, file_name, "cache hit")
-            return False  # sem mudança necessária
+            return False  # no change needed
 
-    # ... resto do fluxo inalterado
+    # ... rest of the flow unchanged
 ```
 
-Após aceitação (build ok), `cache.mark_phase_done(file, phase_name, sha(new_code))` é chamado.
+After acceptance (build ok), `cache.mark_phase_done(file, phase_name, sha(new_code))` is called.
 
 ---
 
-## Integração em `main.py`
+## Integration in `main.py`
 
-Apenas 4 linhas novas na inicialização:
+Only 4 new lines at initialization:
 
 ```python
 from memory.cache import Cache
 from memory.project_dict import reset as reset_dict
 
-# Logo após definir repo_path:
+# Right after defining repo_path:
 cache = Cache(repo_path)
 reset_dict()
 ```
 
-O objeto `cache` é passado para `refactor_file()` e `get_dependency_context()`.
+The `cache` object is passed to `refactor_file()` and `get_dependency_context()`.
 
 ---
 
 ## `.gitignore`
 
-Adicionar:
+Add:
 ```
 .refactor_cache/
 ```
 
 ---
 
-## Estimativa de Redução de Tokens
+## Token Reduction Estimate
 
-| Otimização | Redução estimada |
+| Optimization | Estimated reduction |
 |---|---|
-| `_polish_result()` condicional | ~35–40% |
-| Dep context cache + formato compacto | ~15–20% |
-| Skip de arquivos por fase | ~10–15% |
-| Phase delta (fases mais curtas) | ~8–12% |
+| Conditional `_polish_result()` | ~35–40% |
+| Dep context cache + compact format | ~15–20% |
+| Phase skip per file | ~10–15% |
+| Phase delta (shorter phases) | ~8–12% |
 | Project dictionary singleton | ~3–5% |
-| **Total combinado** | **~55–65%** |
+| **Combined total** | **~55–65%** |
 
 ---
 
-## Critérios de Sucesso
+## Success Criteria
 
-- Build do projeto Java alvo continua passando após refatoração
-- Nenhum arquivo novo de dependência quebrado
-- Logs mostram "cache hit" em fases subsequentes para arquivos não modificados
-- Redução mensurável de chamadas ao modelo (contável via logs)
-- `_polish_result()` chamado apenas nas fases 07, 08, 09
+- Target Java project build continues passing after refactoring
+- No new broken dependency files
+- Logs show "cache hit" on subsequent phases for unmodified files
+- Measurable reduction in model calls (countable via logs)
+- `_polish_result()` called only on phases 07, 08, 09
 
 ---
 
-## Fora do Escopo
+## Out of Scope
 
-- Embeddings / busca vetorial
-- SQLite ou banco de dados
-- Reescrita do pipeline principal (SCAN → REDUCE → SUMMARIZE → PLAN → REFACTOR → VALIDATE)
-- Alteração de `scope_reducer.py`, `validator.py`, `compiler.py`
-- Interface nova ou CLI nova
+- Embeddings / vector search
+- SQLite or database
+- Rewriting the main pipeline (SCAN → REDUCE → SUMMARIZE → PLAN → REFACTOR → VALIDATE)
+- Changing `scope_reducer.py`, `validator.py`, `compiler.py`
+- New interface or new CLI

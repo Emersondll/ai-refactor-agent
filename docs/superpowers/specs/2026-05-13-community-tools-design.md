@@ -107,7 +107,7 @@ phases/claude/            # .md files — replaced by .yml configs
 
 ```yaml
 skill: final-keywords
-description: Adiciona final a variáveis locais e parâmetros não reatribuídos
+description: Add final to local variables and parameters that are never reassigned
 tool: openrewrite                          # openrewrite | google-java-format
 artifact_coordinates:
   - org.openrewrite.recipe:rewrite-static-analysis:RELEASE
@@ -115,10 +115,10 @@ recipes:
   - org.openrewrite.staticanalysis.FinalizeLocalVariables
   - org.openrewrite.staticanalysis.FinalizeMethodArguments
 review_criteria: |
-  O diff deve APENAS adicionar 'final' a variáveis locais e parâmetros
-  de método onde o valor nunca é reatribuído.
-  REJEITE se: lógica alterada, métodos adicionados/removidos,
-  ou qualquer mudança além de inserção de 'final'.
+  The diff must ONLY add 'final' to local variables and method parameters
+  where the value is never reassigned.
+  REJECT if: logic changed, methods added/removed,
+  or any change beyond inserting 'final'.
 ```
 
 For `google-java-format` tool, `artifact_coordinates` and `recipes` are omitted.
@@ -163,17 +163,17 @@ _build_prompt(diff, criteria) -> str
 
 **Review prompt template:**
 ```
-Você é um revisor de código Java. Analise o diff abaixo.
+You are a Java code reviewer. Analyze the diff below.
 
-CRITÉRIOS DE APROVAÇÃO:
+APPROVAL CRITERIA:
 {criteria}
 
 DIFF:
 {diff}
 
-Responda APENAS com uma das opções:
-APPROVE: <motivo em 1 linha>
-REJECT: <motivo em 1 linha>
+Respond ONLY with one of the following:
+APPROVE: <reason in 1 line>
+REJECT: <reason in 1 line>
 ```
 
 ### `agent/loop.py` — updated dispatch

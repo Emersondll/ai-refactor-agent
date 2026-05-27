@@ -1102,7 +1102,7 @@ from config import USE_AGENT_MODE
 Then find the block that starts the phase loop (around line 111):
 
 ```python
-    # --- Fases de Refatoração (SOLID) ---
+    # --- Refactoring Phases (SOLID) ---
     phase_paths = sorted(
         os.path.join(root, fname)
         for root, _, files in os.walk(PHASES_DIR)
@@ -1116,8 +1116,8 @@ Then find the block that starts the phase loop (around line 111):
     for phase_path in phase_paths:
         phase_file = os.path.basename(phase_path)
         rules = read_file(phase_path)
-        log(f"Iniciando Fase: {phase_file}", "PHASE")
-        exec_logger.log_phase_start(phase_file, f"Iniciando {phase_file}")
+        log(f"Starting Phase: {phase_file}", "PHASE")
+        exec_logger.log_phase_start(phase_file, f"Starting {phase_file}")
 
         files = get_java_files(repo_path)
         for f_path in files:
@@ -1128,17 +1128,17 @@ Then find the block that starts the phase loop (around line 111):
 Replace it with:
 
 ```python
-    # --- Refatoração: Agent Loop ou Pipeline fixo ---
+    # --- Refactoring: Agent Loop or Fixed Pipeline ---
     _all_java_files = get_java_files(repo_path)
     exec_logger.log_files_total(len(_all_java_files))
     exec_logger.log_files_queue([os.path.basename(f) for f in _all_java_files])
 
     if USE_AGENT_MODE:
-        log("Modo Agente ativado — Claude planeja, Ollama executa.", "PHASE")
+        log("Agent mode activated — Claude plans, Ollama executes.", "PHASE")
         from agent.loop import run_agent_loop
         run_agent_loop(repo_path, reporter, exec_logger, cache, semantic_mem)
     else:
-        log("Modo Pipeline fixo (USE_AGENT_MODE=false).", "PHASE")
+        log("Fixed pipeline mode (USE_AGENT_MODE=false).", "PHASE")
         phase_paths = sorted(
             os.path.join(root, fname)
             for root, _, files in os.walk(PHASES_DIR)
@@ -1148,8 +1148,8 @@ Replace it with:
         for phase_path in phase_paths:
             phase_file = os.path.basename(phase_path)
             rules = read_file(phase_path)
-            log(f"Iniciando Fase: {phase_file}", "PHASE")
-            exec_logger.log_phase_start(phase_file, f"Iniciando {phase_file}")
+            log(f"Starting Phase: {phase_file}", "PHASE")
+            exec_logger.log_phase_start(phase_file, f"Starting {phase_file}")
             for f_path in get_java_files(repo_path):
                 refactor_file(f_path, rules, repo_path, phase_path, reporter, exec_logger,
                               cache=cache, semantic_mem=semantic_mem)
