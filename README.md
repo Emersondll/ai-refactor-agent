@@ -330,3 +330,13 @@ report.html                  # Visualizador do relatório Markdown de refatoraç
 ---
 
 Desenvolvido para ser o braço direito do desenvolvedor Java que busca excelência e total privacidade dos dados.
+
+---
+
+## Desenvolvedor
+
+**Emerson Lima**
+Engenheiro de Software — especialista em arquitetura Java, automação e IA aplicada ao desenvolvimento.
+
+- GitHub: [@Emersondll](https://github.com/Emersondll)
+- E-mail: emerson.elima@gmail.com
