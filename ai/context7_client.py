@@ -72,9 +72,9 @@ def fetch_java_docs(library_name: str, topic: str,
 
 
 def get_phase_docs(phase_delta: str) -> str:
-    """
-    Detecta quais bibliotecas Java a fase usa e busca docs relevantes.
-    Retorna string vazia se USE_CONTEXT7=false ou sem conexão.
+    """Detects which Java libraries the phase uses and fetches relevant docs.
+
+    Returns empty string if USE_CONTEXT7=false or no connection.
     """
     if not USE_CONTEXT7:
         return ""

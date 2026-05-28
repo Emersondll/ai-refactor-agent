@@ -4,11 +4,11 @@ import subprocess
 
 
 def load_skill(skill_name: str, section: str = "") -> str:
-    """
-    Carrega conteúdo de ~/.claude/skills/<skill_name>/SKILL.md.
-    Remove frontmatter YAML. Se `section` for informado, retorna apenas
-    o conteúdo daquela seção (## Section Name) até a próxima seção de mesmo nível.
-    Retorna string vazia se a skill ou seção não existir.
+    """Load content from ~/.claude/skills/<skill_name>/SKILL.md.
+
+    Strips YAML frontmatter. If `section` is given, returns only the content
+    of that section (## Section Name) up to the next same-level section.
+    Returns empty string if the skill or section does not exist.
     """
     skill_path = os.path.expanduser(f"~/.claude/skills/{skill_name}/SKILL.md")
     if not os.path.exists(skill_path):
@@ -18,7 +18,7 @@ def load_skill(skill_name: str, section: str = "") -> str:
     content = re.sub(r"^---\n.*?\n---\n", "", content, flags=re.DOTALL)
     if not section:
         return content.strip()
-    # Extrai conteúdo da seção ## <section> até a próxima seção ## ou fim do arquivo
+    # Extract section ## <section> up to the next ## or end of file
     pattern = rf"^## {re.escape(section)}\s*\n(.*?)(?=^## |\Z)"
     match = re.search(pattern, content, flags=re.DOTALL | re.MULTILINE)
     if not match:

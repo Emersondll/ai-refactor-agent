@@ -1,4 +1,4 @@
-# config.py — Localização: raiz do projeto (ai-refactor-agent/)
+# config.py — Location: project root (ai-refactor-agent/)
 
 import os
 from dotenv import load_dotenv
@@ -6,25 +6,25 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 # ===========================================================================
-# MODELOS — hierarquia por RAM disponível
+# MODELS — hierarchy by available RAM
 #
-# dolphin-mixtral:8x7b (26GB) foi removido como TERTIARY — OOM na máquina.
-# Substituído por qwen3.5 (6.6GB) e gemma4 (9.6GB) que cabem na RAM.
+# dolphin-mixtral:8x7b (26GB) removed as TERTIARY — OOM on this machine.
+# Replaced by qwen3.5 (6.6GB) and gemma4 (9.6GB) which fit in RAM.
 #
-# Modelos especializados por papel (Role-Based Models):
-MODEL_DOC      = os.getenv("MODEL_DOC",      "qwen2.5-coder:7b")  # (4.7GB) -> Javadoc / Documentação (code-aware: não muda estrutura)
-MODEL_STRUCT   = os.getenv("MODEL_STRUCT",   "qwen2.5-coder:7b")  # (4.7GB) -> Estrutura / Nomenclatura (Melhor para Java)
-MODEL_CLEAN    = os.getenv("MODEL_CLEAN",    "gemma4:latest")      # (9.6GB) -> Clean Code / Testes
-MODEL_SOLID    = os.getenv("MODEL_SOLID",    "qwen2.5-coder:14b")  # (9.0GB) -> SOLID / Arquitetura (O Crítico)
-MODEL_RECOVERY = os.getenv("MODEL_RECOVERY", "qwen2.5-coder:14b")  # (9.0GB) -> Autocura — modelo DIFERENTE de MODEL_CLEAN (second opinion real)
-MODEL_REVIEWER  = os.getenv("MODEL_REVIEWER", MODEL_STRUCT)  # qwen2.5-coder:7b — revisor de diffs (rápido, sem swap de RAM)
+# Role-Based Models:
+MODEL_DOC      = os.getenv("MODEL_DOC",      "qwen2.5-coder:7b")  # (4.7GB) -> Javadoc / Documentation (code-aware: does not change structure)
+MODEL_STRUCT   = os.getenv("MODEL_STRUCT",   "qwen2.5-coder:7b")  # (4.7GB) -> Structure / Naming (best for Java)
+MODEL_CLEAN    = os.getenv("MODEL_CLEAN",    "gemma4:latest")      # (9.6GB) -> Clean Code / Tests
+MODEL_SOLID    = os.getenv("MODEL_SOLID",    "qwen2.5-coder:14b")  # (9.0GB) -> SOLID / Architecture (The Critic)
+MODEL_RECOVERY = os.getenv("MODEL_RECOVERY", "qwen2.5-coder:14b")  # (9.0GB) -> Self-heal — DIFFERENT from MODEL_CLEAN (real second opinion)
+MODEL_REVIEWER  = os.getenv("MODEL_REVIEWER", MODEL_STRUCT)  # qwen2.5-coder:7b — diff reviewer (fast, no RAM swap)
 CLAUDE_MODEL        = "claude-sonnet-4-6"
 CLAUDE_API_KEY      = os.getenv("ANTHROPIC_API_KEY")
 USE_CLAUDE_FALLBACK = os.getenv("USE_CLAUDE_FALLBACK", "true").lower() == "true"
 FLOW_MODE           = os.getenv("FLOW_MODE", "false").lower() == "true"
 
-TIMEOUT      = 600   # refatoração — tempo máximo por chamada Ollama
-TIMEOUT_TEST = 420   # geração de testes — 7 min por chamada; cobre ~50s KV cache + ~250s geração (gemma4 9B) com margem
+TIMEOUT      = 600   # refactoring — max time per Ollama call
+TIMEOUT_TEST = 420   # test generation — 7 min per call; covers ~50s KV cache + ~250s generation (gemma4 9B) with margin
 MAX_RETRIES  = 2
 OLLAMA_SEED  = int(os.getenv("OLLAMA_SEED", "42"))  # fixed seed → reproducible generation run-to-run
 
@@ -64,12 +64,16 @@ GJF_PATH = os.getenv("GJF_PATH", "google-java-format")
 USE_AGENT_MODE   = os.getenv("USE_AGENT_MODE",  "false").lower() == "true"
 AGENT_MAX_CYCLES = int(os.getenv("AGENT_MAX_CYCLES", "20"))
 # PLANNER_MODE: "local" → MODEL_PLANNER planeja (totalmente local)
-#               "claude" → Claude API planeja, Ollama executa (híbrido)
+#               "claude" → Claude API plans, Ollama executes (hybrid)
 PLANNER_MODE      = os.getenv("PLANNER_MODE", "local").lower()
-USE_LOCAL_PLANNER = PLANNER_MODE == "local"  # compatibilidade com código legado
-# Modelo dedicado ao planner local — menor e mais rápido que MODEL_SOLID
-# O planner só precisa gerar JSON de decisões, não código Java complexo
+USE_LOCAL_PLANNER = PLANNER_MODE == "local"  # legacy compatibility
+# Dedicated model for the local planner — smaller and faster than MODEL_SOLID
+# The planner only needs to generate decision JSON, not complex Java code
 MODEL_PLANNER     = os.getenv("MODEL_PLANNER", MODEL_STRUCT)
+
+# GitHub URL of the repository being refactored — shown in the refactoring report.
+# Set via .env: REPO_GITHUB_URL=https://github.com/org/repo
+REPO_GITHUB_URL = os.getenv("REPO_GITHUB_URL", "")
 
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
 PHASES_DIR = os.path.join(BASE_DIR, "phases")

@@ -13,7 +13,7 @@ def test_base_constraints_in_every_prompt():
 def test_no_java_example_block_in_prompt():
     prompt = build_prompt("public class A {}", "# Rule\n- Do X", "refactor", "A.java")
     count = prompt.count("```java")
-    assert count == 1, f"Esperado 1 bloco java (source), mas encontrou {count}"
+    assert count == 1, f"Expected 1 java block (source), but found {count}"
 
 def test_phase_delta_appears_in_prompt():
     prompt = build_prompt("public class A {}", "# SOLID\n- Apply DIP", "refactor", "A.java")
@@ -32,7 +32,7 @@ def test_dep_context_absent_when_empty():
 def test_test_mode_task_different_from_refactor():
     p_refactor = build_prompt("public class A {}", "# Rule", "refactor", "A.java")
     p_test = build_prompt("public class A {}", "# Rule", "test", "A.java")
-    assert "testes unitários" in p_test or "JUnit" in p_test
+    assert "JUnit" in p_test or "unit test" in p_test.lower()
     assert p_refactor != p_test
 
 def test_source_file_appears_at_end():

@@ -1,13 +1,13 @@
 # core/execution_logger.py
 #
-# Logger estruturado — grava rastreamento completo em arquivo.
-# Usado em: main.py (inicialização) e refactor.py (por arquivo/fase).
+# Structured logger — writes complete audit trail to file.
+# Used in: main.py (initialization) and refactor.py (per file/phase).
 #
-# Gera dois arquivos em logs/:
-#   execution.log   → texto legível (para você ler durante/após a execução)
-#   execution.jsonl → JSON Lines estruturado (para análise, grep, scripts)
+# Generates two files in logs/:
+#   execution.log   → human-readable text (read during/after execution)
+#   execution.jsonl → structured JSON Lines (for analysis, grep, scripts)
 #
-# NÃO faz output no terminal. Para saída ao vivo no terminal, use logger.py.
+# Does NOT output to terminal. For live terminal output, use logger.py.
 
 import os
 import json
@@ -15,7 +15,7 @@ from datetime import datetime
 
 
 class ExecutionLogger:
-    """Rastreamento auditável de todas as operações do agente."""
+    """Auditable tracker for all agent operations."""
 
     def __init__(self, logs_dir: str = "logs") -> None:
         self.logs_dir = logs_dir
@@ -27,24 +27,24 @@ class ExecutionLogger:
         with open(self._jsonl, "w") as f:
             f.write("")
         with open(self._text, "w") as f:
-            f.write(f"=== Execução iniciada em {datetime.now().isoformat()} ===\n\n")
+            f.write(f"=== Execution started at {datetime.now().isoformat()} ===\n\n")
 
     # ------------------------------------------------------------------
-    # Fase
+    # Phase
     # ------------------------------------------------------------------
 
     def log_phase_start(self, phase: str, model: str) -> None:
         self._write(
             phase=phase, model=model,
             event="PHASE_START", status="INFO",
-            message=f"Iniciando {phase} com {model}",
+            message=f"Starting {phase} with {model}",
         )
 
     # ------------------------------------------------------------------
     # Git
     # ------------------------------------------------------------------
 
-    def log_coverage(self, coverage: float, label: str = "Cobertura Global Atual") -> None:
+    def log_coverage(self, coverage: float, label: str = "Current Global Coverage") -> None:
         self._write(
             event="COVERAGE", status="OK" if coverage >= 90.0 else "WARN",
             message=f"{label}: {coverage:.2f}%",
@@ -52,35 +52,35 @@ class ExecutionLogger:
 
     def log_files_total(self, count: int) -> None:
         self._write(event="FILES_TOTAL", status="INFO",
-                    message=f"Total de arquivos a processar: {count}", count=count)
+                    message=f"Total files to process: {count}", count=count)
 
     def log_files_queue(self, files: list) -> None:
-        """Loga a fila completa de arquivos para o dashboard pré-popular o honeycomb."""
+        """Logs the full file queue so the dashboard can pre-populate the honeycomb."""
         self._write(event="FILES_QUEUE", status="INFO",
-                    message=f"Fila: {len(files)} arquivos", files=files)
+                    message=f"Queue: {len(files)} files", files=files)
 
     def log_git_branch_created(self, branch: str) -> None:
         self._write(
             event="GIT_BRANCH_CREATED", status="OK",
-            message=f"Branch criada: {branch}",
+            message=f"Branch created: {branch}",
         )
 
     def log_git_commit(self, phase: str, branch: str) -> None:
         self._write(
             phase=phase, branch=branch,
             event="GIT_COMMIT", status="SUCCESS",
-            message=f"Commit em {branch} após {phase}",
+            message=f"Commit on {branch} after {phase}",
         )
 
     # ------------------------------------------------------------------
-    # Arquivo — assinaturas compatíveis com refactor.py
+    # File — signatures compatible with refactor.py
     # ------------------------------------------------------------------
 
     def log_file_processing(self, phase: str, file: str,
                              file_type: str = "", mode: str = "") -> None:
-        """
-        Arquivo entrou no pipeline.
-        Chamado em refactor.py como:
+        """File entered the pipeline.
+
+        Called in refactor.py as:
           exec_logger.log_file_processing(phase, file_name, "unknown", "unknown")
           exec_logger.log_file_processing(phase, test_name, "test", "new")
         """
@@ -88,22 +88,22 @@ class ExecutionLogger:
             phase=phase, file=file,
             file_type=file_type, mode=mode,
             event="FILE_START", status="INFO",
-            message=f"Processando {file}",
+            message=f"Processing {file}",
         )
 
     def log_file_skipped(self, phase: str, file: str, reason: str) -> None:
-        """Arquivo pulado antes de chamar a IA (should_skip)."""
+        """File skipped before calling the LLM (should_skip)."""
         self._write(
             phase=phase, file=file,
             event="FILE_SKIPPED", status="SKIP",
-            message=f"Pulado: {reason}",
+            message=f"Skipped: {reason}",
         )
 
     def log_file_accepted(self, phase: str, file: str,
                           change_type: str = "") -> None:
-        """
-        Arquivo aceito com sucesso.
-        Chamado em refactor.py como:
+        """File accepted successfully.
+
+        Called in refactor.py as:
           exec_logger.log_file_accepted(phase, file_name, "+refactor")
           exec_logger.log_file_accepted(phase, test_name, "+test")
         """
@@ -111,12 +111,12 @@ class ExecutionLogger:
             phase=phase, file=file,
             change_type=change_type,
             event="FILE_ACCEPTED", status="SUCCESS",
-            message=f"Aceito {change_type}",
+            message=f"Accepted {change_type}",
         )
 
     def log_file_reverted(self, phase: str, file: str, error_type: str = "") -> None:
-        """Arquivo revertido porque o build quebrou após a mudança."""
-        message = f"Revertido — build quebrou [{error_type}]" if error_type else "Revertido — build quebrou"
+        """File reverted because the build broke after the change."""
+        message = f"Reverted — build broke [{error_type}]" if error_type else "Reverted — build broke"
         self._write(
             phase=phase, file=file,
             event="FILE_REVERTED", status="REVERT",
@@ -124,7 +124,7 @@ class ExecutionLogger:
         )
 
     # ------------------------------------------------------------------
-    # IA
+    # AI
     # ------------------------------------------------------------------
 
     def log_ai_attempt(self, phase: str, file: str,
@@ -132,14 +132,14 @@ class ExecutionLogger:
         self._write(
             phase=phase, file=file, agent=agent,
             event="AI_ATTEMPT", status="INFO",
-            message=f"[{agent}] tentativa {attempt}",
+            message=f"[{agent}] attempt {attempt}",
         )
 
     def log_ai_success(self, phase: str, file: str, agent: str) -> None:
         self._write(
             phase=phase, file=file, agent=agent,
             event="AI_SUCCESS", status="SUCCESS",
-            message=f"[{agent}] resposta válida",
+            message=f"[{agent}] valid response",
         )
 
     def log_ai_failure(self, phase: str, file: str,
@@ -147,7 +147,7 @@ class ExecutionLogger:
         self._write(
             phase=phase, file=file, agent=agent,
             event="AI_FAILURE", status="ERROR",
-            message=f"[{agent}] falha: {reason}",
+            message=f"[{agent}] failure: {reason}",
         )
 
     def log_model_used(self, phase: str, file: str,
@@ -159,7 +159,7 @@ class ExecutionLogger:
         )
 
     # ------------------------------------------------------------------
-    # Validação e compilação
+    # Validation and compilation
     # ------------------------------------------------------------------
 
     def log_validation_rejected(self, phase: str, file: str,
@@ -174,49 +174,49 @@ class ExecutionLogger:
         self._write(
             phase=phase, file=file,
             event="COMPILATION_PASSED", status="SUCCESS",
-            message="mvn clean test PASSOU",
+            message="mvn clean test PASSED",
         )
 
     def log_compilation_failed(self, phase: str, file: str) -> None:
         self._write(
             phase=phase, file=file,
             event="COMPILATION_FAILED", status="ERROR",
-            message="mvn clean test FALHOU",
+            message="mvn clean test FAILED",
         )
 
     def log_detailed_diagnostic(self, phase: str, file: str, error_output: str, diagnostics: list) -> None:
-        """Salva um relatório completo da falha para análise técnica posterior."""
+        """Saves a complete failure report for later technical analysis."""
         diag_dir = os.path.join(self.logs_dir, "diagnostics")
         os.makedirs(diag_dir, exist_ok=True)
-        
+
         safe_file_name = file.replace("/", "_").replace(".", "_")
         diag_file = os.path.join(diag_dir, f"diag_{phase}_{safe_file_name}_{datetime.now().strftime('%H%M%S')}.txt")
-        
+
         with open(diag_file, "w", encoding="utf-8") as f:
-            f.write(f"RELATÓRIO DE DIAGNÓSTICO DE FALHA\n")
-            f.write(f"="*40 + "\n")
-            f.write(f"Arquivo: {file}\n")
-            f.write(f"Fase:    {phase}\n")
-            f.write(f"Data:    {datetime.now().isoformat()}\n")
-            f.write(f"="*40 + "\n\n")
-            
-            f.write("RESUMO RAIO-X (TRECHOS DE CÓDIGO):\n")
+            f.write("FAILURE DIAGNOSTIC REPORT\n")
+            f.write("=" * 40 + "\n")
+            f.write(f"File:  {file}\n")
+            f.write(f"Phase: {phase}\n")
+            f.write(f"Date:  {datetime.now().isoformat()}\n")
+            f.write("=" * 40 + "\n\n")
+
+            f.write("X-RAY SUMMARY (CODE EXCERPTS):\n")
             for d in diagnostics:
                 f.write(f"- {d}\n")
-            f.write("\n" + "="*40 + "\n\n")
-            
-            f.write("LOG COMPLETO DO MAVEN:\n")
+            f.write("\n" + "=" * 40 + "\n\n")
+
+            f.write("FULL MAVEN LOG:\n")
             f.write(error_output)
-            f.write("\n" + "="*40 + "\n")
-        
+            f.write("\n" + "=" * 40 + "\n")
+
         self._write(
             phase=phase, file=file,
             event="DIAGNOSTIC_SAVED", status="INFO",
-            message=f"Log detalhado salvo em: {os.path.basename(diag_file)}"
+            message=f"Detailed log saved: {os.path.basename(diag_file)}"
         )
 
     # ------------------------------------------------------------------
-    # Escrita interna
+    # Internal write
     # ------------------------------------------------------------------
 
     def _write(self, **kwargs) -> None:

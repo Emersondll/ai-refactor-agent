@@ -12,7 +12,7 @@ def make_cache(tmp_path):
 # --- _extract_simplified_header ---
 
 def test_header_includes_public_method_signature():
-    from java.context import _extract_simplified_header
+    from java.dep_context import _extract_simplified_header
     code = """\
 package com.ex;
 public class MyService {
@@ -28,7 +28,7 @@ public class MyService {
     assert "helper" not in header
 
 def test_header_excludes_private_fields():
-    from java.context import _extract_simplified_header
+    from java.dep_context import _extract_simplified_header
     code = """\
 package com.ex;
 public class OrderService {
@@ -41,7 +41,7 @@ public class OrderService {
     assert "private int count" not in header
 
 def test_header_includes_class_declaration():
-    from java.context import _extract_simplified_header
+    from java.dep_context import _extract_simplified_header
     code = "package com.ex;\npublic class Foo {\n    public void run() {}\n}"
     header = _extract_simplified_header(code, "com.ex.Foo")
     assert "class Foo" in header or "Foo" in header
@@ -50,7 +50,7 @@ def test_header_includes_class_declaration():
 # --- get_dependency_context cache behavior ---
 
 def test_dep_context_cache_hit_avoids_rebuild(tmp_path):
-    from java.context import get_dependency_context
+    from java.dep_context import get_dependency_context
     from memory.cache import sha12
 
     cache = make_cache(tmp_path)
@@ -66,7 +66,7 @@ def test_dep_context_cache_hit_avoids_rebuild(tmp_path):
     assert result == cached_value
 
 def test_dep_context_cache_miss_calls_build_and_stores(tmp_path):
-    from java.context import get_dependency_context
+    from java.dep_context import get_dependency_context
     from memory.cache import sha12
 
     cache = make_cache(tmp_path)
@@ -82,7 +82,7 @@ def test_dep_context_cache_miss_calls_build_and_stores(tmp_path):
     assert cache.get_dep_context(file_hash) == "// BUILT"
 
 def test_dep_context_no_cache_calls_build_directly(tmp_path):
-    from java.context import get_dependency_context
+    from java.dep_context import get_dependency_context
 
     with patch("config.USE_RAG_CONTEXT", False), \
          patch("java.context._build_dep_context", return_value="// NO CACHE") as mock_build:

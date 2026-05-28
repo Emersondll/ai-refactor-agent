@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 
 from config import USE_RAG_CONTEXT, OLLAMA_EMBED_MODEL, OLLAMA_BASE_URL
-from java.context import _extract_simplified_header
+from java.dep_context import _extract_simplified_header
 
 _index_cache: dict[str, object] = {}  # repo_path → LlamaIndex VectorStoreIndex
 

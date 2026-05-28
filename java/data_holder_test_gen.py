@@ -1,17 +1,15 @@
 """
-data_holder_test_gen.py — Localização: java/data_holder_test_gen.py
+data_holder_test_gen.py — Deterministic JUnit 5 test generator for pure data-holder classes
+(@Document / @Entity / POJOs with only fields + constructor + getters/setters).
 
-Gerador determinístico de testes JUnit 5 para classes data-holder puras
-(@Document / @Entity / POJOs com apenas campos + construtor + getters/setters).
-
-Não envolve LLM — produz testes perfeitos e reproduzíveis sem repair loop.
+No LLM involved — produces perfect, reproducible tests without a repair loop.
 """
 
 import re
 from typing import Optional
 
 # ---------------------------------------------------------------------------
-# Tabela de tipos suportados: tipo → (import_stmt | None, sample_A, sample_B)
+# Supported types table: type → (import_stmt | None, sample_A, sample_B)
 # ---------------------------------------------------------------------------
 _SUPPORTED_TYPES: dict[str, tuple[Optional[str], str, str]] = {
     "String":        (None,                              '"sampleA"',                                  '"sampleB"'),
@@ -68,16 +66,16 @@ def _extract_enum_constants(dep_context: str, enum_name: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Regexes auxiliares
+# Helper regexes
 # ---------------------------------------------------------------------------
 
-# Captura declaração de classe (não interface, enum, record)
+# Captures class declaration (not interface, enum, or record)
 _CLASS_DECL_RE = re.compile(
     r'(?:public\s+)?(?:final\s+)?(?:abstract\s+)?class\s+(\w+)',
     re.MULTILINE,
 )
 
-# Rejeita se contém interface/enum/record declaration
+# Rejects if it contains an interface/enum/record declaration
 _NOT_CLASS_RE = re.compile(
     r'\b(?:interface|enum|record)\s+\w+',
     re.MULTILINE,
@@ -97,19 +95,19 @@ _SETTER_RE = re.compile(
     re.MULTILINE | re.DOTALL,
 )
 
-# Construtor: public ClassName(...)
+# Constructor: public ClassName(...)
 _CTOR_RE = re.compile(
     r'public\s+(\w+)\s*\(([^)]*)\)\s*\{([^}]*)\}',
     re.MULTILINE | re.DOTALL,
 )
 
-# Método genérico (para detectar métodos não-getter/setter/ctor/eq/hc/ts)
+# Generic method pattern (to detect non-getter/setter/ctor/eq/hc/ts methods)
 _METHOD_RE = re.compile(
     r'(?:public|protected|private)\s+(?:static\s+)?(?:final\s+)?\S+\s+(\w+)\s*\([^)]*\)\s*\{',
     re.MULTILINE,
 )
 
-# Field declaration: private T name;
+# Field declaration: private T fieldName;
 _FIELD_RE = re.compile(
     r'private\s+(\w+)\s+(\w+)\s*;',
     re.MULTILINE,
@@ -125,25 +123,25 @@ _PACKAGE_RE = re.compile(r'^\s*package\s+([\w.]+)\s*;', re.MULTILINE)
 
 def is_pure_data_holder(code: str) -> bool:
     """
-    Retorna True somente se ``code`` declara uma classe (não interface/enum/record)
-    cujos TODOS os métodos são: getter, setter, construtor ou equals/hashCode/toString.
-    Qualquer outra lógica → False.  Ambiguidade de parsing → False (conservador).
+    Returns True only if ``code`` declares a class (not interface/enum/record)
+    whose ALL methods are: getter, setter, constructor, or equals/hashCode/toString.
+    Any other logic → False. Parsing ambiguity → False (conservative).
     """
-    # Deve ter declaração de classe
+    # Must have a class declaration
     if not _CLASS_DECL_RE.search(code):
         return False
 
-    # Não pode ser interface, enum ou record
+    # Must not be interface, enum, or record
     if _NOT_CLASS_RE.search(code):
         return False
 
-    # Determina o nome da classe
+    # Determine the class name
     cls_match = _CLASS_DECL_RE.search(code)
     if not cls_match:
         return False
     class_name = cls_match.group(1)
 
-    # Extrai o corpo da classe (tudo entre o { de abertura da declaração de classe e o } final)
+    # Extract the class body (everything between the opening { and the final })
     try:
         class_body = _extract_class_body(code, class_name)
     except Exception:
@@ -152,15 +150,14 @@ def is_pure_data_holder(code: str) -> bool:
     if class_body is None:
         return False
 
-    # Encontra todos os métodos declarados no corpo
-    # Um "método" é qualquer bloco com modificador de acesso + tipo + nome + parênteses + chaves
-    # Constrói lista de métodos encontrados
+    # Find all methods declared in the body
+    # A "method" is any block with access modifier + type + name + parentheses + braces
     methods = _METHOD_RE.findall(class_body)
 
-    # Nomes permitidos
+    # Allowed method names
     allowed_names = {"equals", "hashCode", "toString"}
 
-    # Constrói sets de getter e setter names
+    # Build getter and setter name sets
     getter_names = {m.group(1).lower() for m in _GETTER_RE.finditer(class_body)}
     setter_names = {m.group(1).lower() for m in _SETTER_RE.finditer(class_body)}
     ctor_names   = {class_name}
@@ -171,7 +168,7 @@ def is_pure_data_holder(code: str) -> bool:
             continue
         if method_name in allowed_names:
             continue
-        # Getter: getXxx ou isXxx → suffix lowercase in getter_names
+        # Getter: getXxx or isXxx → suffix lowercase in getter_names
         if method_name.startswith("get") and name_lower[3:] in getter_names:
             continue
         if method_name.startswith("is") and name_lower[2:] in getter_names:
@@ -179,11 +176,11 @@ def is_pure_data_holder(code: str) -> bool:
         # Setter
         if method_name.startswith("set") and name_lower[3:] in setter_names:
             continue
-        # Nenhuma regra cobriu — método com outra lógica
+        # No rule covered it — method with other logic
         return False
 
-    # Se não encontrou nenhum método, pode ser apenas campos → ainda é um data holder
-    # mas só se tiver pelo menos um construtor (para ser testável)
+    # If no methods found, it may be just fields → still a data holder
+    # but only if it has at least one constructor (to be testable)
     ctor_matches = [m for m in _CTOR_RE.finditer(class_body) if m.group(1) == class_name]
     if not ctor_matches:
         return False
@@ -192,8 +189,8 @@ def is_pure_data_holder(code: str) -> bool:
 
 
 def _extract_class_body(code: str, class_name: str) -> Optional[str]:
-    """Extrai o conteúdo entre chaves da declaração da classe."""
-    # Encontra a posição do `class ClassName` e caminha até a chave de abertura
+    """Extracts the content between braces of the class declaration."""
+    # Locate `class ClassName` and walk forward to the opening brace
     pattern = re.compile(
         r'(?:public\s+)?(?:final\s+)?(?:abstract\s+)?class\s+' + re.escape(class_name) + r'\b[^{]*\{',
         re.MULTILINE | re.DOTALL,
@@ -202,7 +199,7 @@ def _extract_class_body(code: str, class_name: str) -> Optional[str]:
     if not m:
         return None
 
-    start = m.end()  # posição logo após o '{'
+    start = m.end()  # position right after '{'
     depth = 1
     i = start
     while i < len(code) and depth > 0:
@@ -213,7 +210,7 @@ def _extract_class_body(code: str, class_name: str) -> Optional[str]:
         i += 1
 
     if depth != 0:
-        return None  # chaves desbalanceadas
+        return None  # unbalanced braces
 
     return code[start:i - 1]
 
@@ -229,19 +226,19 @@ def generate_data_holder_test(
     dep_context: str = "",
 ) -> Optional[str]:
     """
-    Gera o código-fonte Java completo de um teste JUnit 5 para a classe data-holder
-    descrita em ``code``.
+    Generates the full Java source code of a JUnit 5 test for the data-holder class
+    described in ``code``.
 
-    Retorna None se:
-    - ``code`` não é um data holder puro;
-    - algum tipo de campo/parâmetro do construtor não está na tabela de tipos suportados;
-    - o único construtor é no-arg;
-    - os parâmetros do construtor não mapeiam 1:1 por nome para campos com getters.
+    Returns None if:
+    - ``code`` is not a pure data holder;
+    - any field/constructor parameter type is not in the supported-types table;
+    - the only constructor is no-arg;
+    - constructor parameters do not map 1:1 by name to fields with getters.
     """
     if not is_pure_data_holder(code):
         return None
 
-    # --- Extrai package e nome da classe de produção
+    # --- Extract package and production class name
     pkg_match = _PACKAGE_RE.search(code)
     prod_package = pkg_match.group(1) if pkg_match else ""
 
@@ -250,32 +247,32 @@ def generate_data_holder_test(
         return None
     class_name = cls_match.group(1)
 
-    # --- Extrai corpo da classe
+    # --- Extract class body
     class_body = _extract_class_body(code, class_name)
     if class_body is None:
         return None
 
-    # --- Extrai fields: name → type
+    # --- Extract fields: name → type
     fields: dict[str, str] = {}
     for m in _FIELD_RE.finditer(class_body):
         ftype, fname = m.group(1), m.group(2)
         fields[fname] = ftype
 
-    # --- Localiza construtor com argumentos
+    # --- Locate constructor with arguments
     ctor_params: list[tuple[str, str]] = []  # [(type, name), ...]
     for m in _CTOR_RE.finditer(class_body):
         if m.group(1) != class_name:
             continue
         params_str = m.group(2).strip()
         if not params_str:
-            continue  # no-arg — ignora
-        # Analisa parâmetros: "Type name, Type name, ..."
+            continue  # no-arg — skip
+        # Parse parameters: "Type name, Type name, ..."
         params = [p.strip() for p in params_str.split(",") if p.strip()]
         parsed = []
         for p in params:
             parts = p.split()
             if len(parts) < 2:
-                return None  # parsing ambíguo
+                return None  # ambiguous parsing
             ptype = parts[-2]
             pname = parts[-1]
             parsed.append((ptype, pname))
@@ -284,7 +281,7 @@ def generate_data_holder_test(
             break
 
     if not ctor_params:
-        return None  # somente construtor no-arg → não testável de forma útil
+        return None  # only no-arg constructor → not usefully testable
 
     # --- Resolve enum types from dep_context; build enum_samples map
     # For each type not in _SUPPORTED_TYPES, try to resolve via dep_context enum
@@ -307,11 +304,11 @@ def generate_data_holder_test(
         enum_import = f"import {imp_m.group(1)};"
         _enum_samples[ptype] = (enum_import, sample_val, sample_val)
 
-    # --- Monta mapa de getters: field_name_lower → getter_method_name
+    # --- Build getter map: field_name_lower → getter_method_name
     getter_map: dict[str, str] = {}
     for m in _GETTER_RE.finditer(class_body):
         suffix = m.group(1)  # "Id", "Name", etc.
-        # Recupera o tipo de retorno para distinguir is/get
+        # Retrieve the return type to distinguish is/get
         full_match = m.group(0)
         if re.match(r'public\s+boolean\s+is', full_match):
             getter_method = "is" + suffix
@@ -319,13 +316,13 @@ def generate_data_holder_test(
             getter_method = "get" + suffix
         getter_map[suffix.lower()] = getter_method
 
-    # --- Monta mapa de setters: field_name_lower → setter_method_name
+    # --- Build setter map: field_name_lower → setter_method_name
     setter_map: dict[str, str] = {}
     for m in _SETTER_RE.finditer(class_body):
         suffix = m.group(1)
         setter_map[suffix.lower()] = "set" + suffix
 
-    # --- Valida mapeamento 1:1 construtor → getter
+    # --- Validate 1:1 mapping constructor → getter
     for ptype, pname in ctor_params:
         if pname.lower() not in getter_map:
             return None
@@ -336,14 +333,14 @@ def generate_data_holder_test(
             return _SUPPORTED_TYPES[ptype]
         return _enum_samples[ptype]
 
-    # --- Coleta imports necessários
+    # --- Collect required imports
     needed_imports: set[str] = set()
     for ptype, _ in ctor_params:
         imp, _, _ = _type_info(ptype)
         if imp:
             needed_imports.add(imp)
 
-    # Imports dos tipos dos setters (round-trip tests)
+    # Imports for setter types (round-trip tests)
     for ptype, pname in ctor_params:
         pname_lower = pname.lower()
         if pname_lower in setter_map:
@@ -351,13 +348,13 @@ def generate_data_holder_test(
             if imp:
                 needed_imports.add(imp)
 
-    # Import da classe de produção
+    # Import of the production class
     if prod_package:
         prod_import = f"import {prod_package}.{class_name};"
     else:
         prod_import = None
 
-    # --- Monta amostras
+    # --- Build samples
     sample_a: dict[str, str] = {}
     sample_b: dict[str, str] = {}
     for ptype, pname in ctor_params:
@@ -365,10 +362,10 @@ def generate_data_holder_test(
         sample_a[pname] = sa
         sample_b[pname] = sb
 
-    # --- Gera lista de argumentos do construtor (sample A)
+    # --- Build constructor argument list (sample A)
     ctor_args_a = ", ".join(sample_a[pname] for _, pname in ctor_params)
 
-    # --- Gera bloco constructor_shouldInitializeAllFields
+    # --- Generate constructor_shouldInitializeAllFields block
     assertions_lines = []
     for ptype, pname in ctor_params:
         getter_method = getter_map[pname.lower()]
@@ -385,7 +382,7 @@ def generate_data_holder_test(
         f"    }}"
     )
 
-    # --- Gera testes de round-trip setter/getter (um por setter que tem getter correspondente)
+    # --- Generate setter/getter round-trip tests (one per setter that has a matching getter)
     round_trip_tests = []
     for ptype, pname in ctor_params:
         pname_lower = pname.lower()
@@ -393,7 +390,7 @@ def generate_data_holder_test(
             continue
         setter_method = setter_map[pname_lower]
         getter_method = getter_map[pname_lower]
-        # Capitaliza para o nome do teste: setId_getId_roundTrip
+        # Capitalize for test name: setId_getId_roundTrip
         cap = pname[0].upper() + pname[1:]
         test_method_name = f"set{cap}_get{cap}_roundTrip"
         sb = sample_b[pname]
@@ -407,7 +404,7 @@ def generate_data_holder_test(
         )
         round_trip_tests.append(test_body)
 
-    # --- Monta o arquivo completo
+    # --- Assemble the full file
     lines: list[str] = []
 
     # package
@@ -422,7 +419,7 @@ def generate_data_holder_test(
     for imp in sorted(needed_imports):
         lines.append(imp)
 
-    # prod class import
+    # production class import
     if prod_import:
         lines.append(prod_import)
 

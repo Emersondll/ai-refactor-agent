@@ -1,10 +1,8 @@
 """
-model.py — Localização: ai/model.py
+model.py — Location: ai/model.py
 
-ADICIONADO: call_ai_with_correction()
-  Função separada que recebe o código rejeitado + motivo e monta
-  um prompt de correção direcionado, enviando para o mesmo pipeline
-  de agentes.
+Provides call_model (Ollama), call_ai (with routing + retry),
+and call_ai_with_correction (targeted repair prompt on rejected code).
 """
 
 import requests
@@ -28,10 +26,10 @@ _OOM_SIGNALS = ("model requires more system", "not enough memory", "out of memor
 MAX_CORRECTIONS = 1
 _last_successful_model: str = ""  # updated on every successful call_ai
 
-# N9: contador de timeouts consecutivos POR ARQUIVO. Cada call_model timeout
-# incrementa; sucesso reseta. _try_local_agent aborta antecipadamente quando
-# atinge _TIMEOUT_ABORT_THRESHOLD para evitar cascata de timeouts inúteis.
-# generate_tests deve chamar reset_consecutive_timeouts() ao iniciar cada arquivo.
+# N9: per-file consecutive timeout counter. Each call_model timeout increments it;
+# success resets it. _try_local_agent aborts early when _TIMEOUT_ABORT_THRESHOLD
+# is reached to avoid useless timeout cascades.
+# generate_tests must call reset_consecutive_timeouts() at the start of each file.
 _consecutive_timeouts: int = 0
 _TIMEOUT_ABORT_THRESHOLD: int = 2
 
@@ -46,7 +44,7 @@ def reset_consecutive_timeouts() -> None:
 
 
 def _set_consecutive_timeouts_for_test(value: int) -> None:
-    """Apenas para testes — NÃO usar em produção."""
+    """For tests only — do NOT use in production."""
     global _consecutive_timeouts
     _consecutive_timeouts = value
 
@@ -60,12 +58,12 @@ _OLLAMA_RECOVER_RETRIES = 3
 
 
 def wait_for_ollama_recovery() -> bool:
-    """Aguarda Ollama recuperar RAM após OOM. Retorna True se recuperou."""
+    """Waits for Ollama to recover RAM after OOM. Returns True if recovered."""
     for attempt in range(1, _OLLAMA_RECOVER_RETRIES + 1):
         try:
             r = requests.get(_OLLAMA_HEALTH_URL, timeout=5)
             if r.status_code == 200:
-                # Testa se pelo menos um modelo responde a um prompt mínimo
+                # Test whether at least one model responds to a minimal prompt
                 test_model = next(
                     (m for m in [MODEL_SOLID, MODEL_CLEAN, MODEL_STRUCT, MODEL_DOC]
                      if m and m not in _OOM_MODELS),
@@ -77,17 +75,17 @@ def wait_for_ollama_recovery() -> bool:
                            "options": {"num_predict": 1}}
                 pr = requests.post("http://localhost:11434/api/generate", json=payload, timeout=30)
                 if pr.status_code == 200:
-                    log(f"  [Ollama] serviço recuperado após {(attempt-1)*_OLLAMA_RECOVER_WAIT_S}s", "OK")
+                    log(f"  [Ollama] service recovered after {(attempt-1)*_OLLAMA_RECOVER_WAIT_S}s", "OK")
                     return True
                 if _is_oom_error(pr.text):
-                    log(f"  [Ollama] ainda OOM, aguardando {_OLLAMA_RECOVER_WAIT_S}s (tentativa {attempt}/{_OLLAMA_RECOVER_RETRIES})...", "WARN")
+                    log(f"  [Ollama] still OOM, waiting {_OLLAMA_RECOVER_WAIT_S}s (attempt {attempt}/{_OLLAMA_RECOVER_RETRIES})...", "WARN")
                     time.sleep(_OLLAMA_RECOVER_WAIT_S)
                     continue
         except Exception:
             pass
-        log(f"  [Ollama] indisponível, aguardando {_OLLAMA_RECOVER_WAIT_S}s (tentativa {attempt}/{_OLLAMA_RECOVER_RETRIES})...", "WARN")
+        log(f"  [Ollama] unavailable, waiting {_OLLAMA_RECOVER_WAIT_S}s (attempt {attempt}/{_OLLAMA_RECOVER_RETRIES})...", "WARN")
         time.sleep(_OLLAMA_RECOVER_WAIT_S)
-    log("  [Ollama] não recuperou após todas as tentativas — pulando arquivo", "ERR")
+    log("  [Ollama] did not recover after all attempts — skipping file", "ERR")
     return False
 
 PHASES_REQUIRING_POLISH: frozenset[str] = frozenset({
@@ -102,9 +100,7 @@ def _is_oom_error(text: str) -> bool:
 def call_model(model: str, prompt: str, temperature: float = 0.7,
                timeout: int | None = None,
                num_predict: int = 4096) -> tuple[str | None, bool]:
-    """
-    Chama o Ollama via API HTTP para melhor controle e performance.
-    """
+    """Calls Ollama via HTTP API for better control and performance."""
     global _consecutive_timeouts  # N9: declared once at function top per Python rules
     url = "http://localhost:11434/api/generate"
     payload = {
@@ -133,13 +129,13 @@ def call_model(model: str, prompt: str, temperature: float = 0.7,
         return data.get("response"), False
 
     except requests.exceptions.Timeout:
-        log(f"[{model}] timeout na API após {_timeout}s", "WARN")
+        log(f"[{model}] API timeout after {_timeout}s", "WARN")
         _consecutive_timeouts += 1
         return None, False
     except Exception as e:
         if _is_oom_error(str(e)):
             return None, True
-        log(f"[{model}] erro na API: {e}", "ERR")
+        log(f"[{model}] API error: {e}", "ERR")
         return None, False
 
 
@@ -149,7 +145,7 @@ def call_model(model: str, prompt: str, temperature: float = 0.7,
 
 def _build_correction_prompt(original_prompt: str, bad_output: str,
                               error_reason: str) -> str:
-    """Prompt genérico de correção de output inválido (formato)."""
+    """Generic correction prompt for invalid output format."""
     return (
         f"{original_prompt}\n\n"
         "### PREVIOUS ATTEMPT WAS REJECTED\n"
@@ -166,10 +162,10 @@ def _build_validator_correction_prompt(original_prompt: str, bad_output: str,
                                         validator_error: str,
                                         original_code: str = "",
                                         expected_class: str = "") -> str:
-    """
-    Prompt de correção específico para erros do validator Java.
-    Injeta package e class name — usa expected_class (nome do arquivo destino) quando disponível,
-    evitando extrair o nome da classe de produção (que seria errado no modo test).
+    """Correction prompt for Java validator errors.
+
+    Injects package and class name — uses expected_class (destination file name) when
+    available to avoid extracting the production class name (wrong in test mode).
     """
     import re as _re
     mandatory_lines = []
@@ -177,8 +173,8 @@ def _build_validator_correction_prompt(original_prompt: str, bad_output: str,
         pkg_m = _re.search(r'^(package\s+[\w.]+;)', original_code, _re.MULTILINE)
         if pkg_m:
             mandatory_lines.append(f"- Package MUST be exactly: {pkg_m.group(1)}")
-    # B: usa expected_class quando disponível — evita usar o nome da classe de produção
-    # como constraint quando o destino é um arquivo de teste com nome diferente.
+    # B: use expected_class when available — avoids using the production class name
+    # as a constraint when the destination is a test file with a different name.
     if expected_class:
         mandatory_lines.append(f"- Class/record name MUST be exactly: {expected_class}")
     elif original_code:
@@ -218,7 +214,7 @@ def _build_validator_correction_prompt(original_prompt: str, bad_output: str,
 
 def call_claude(prompt: str) -> str | None:
     if not CLAUDE_API_KEY:
-        log("ANTHROPIC_API_KEY não encontrada no .env", "ERR")
+        log("ANTHROPIC_API_KEY not found in .env", "ERR")
         return None
     try:
         client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
@@ -229,13 +225,13 @@ def call_claude(prompt: str) -> str | None:
         )
         return message.content[0].text
     except anthropic.AuthenticationError:
-        log("ANTHROPIC_API_KEY inválida ou expirada", "ERR")
+        log("ANTHROPIC_API_KEY invalid or expired", "ERR")
     except anthropic.RateLimitError:
-        log("Rate limit da API Anthropic atingido", "WARN")
+        log("Anthropic API rate limit reached", "WARN")
     except anthropic.APIConnectionError:
-        log("Sem conexão com a API Anthropic", "ERR")
+        log("No connection to Anthropic API", "ERR")
     except Exception as e:
-        log(f"[claude-api] erro inesperado: {e}", "ERR")
+        log(f"[claude-api] unexpected error: {e}", "ERR")
     return None
 
 
@@ -246,46 +242,46 @@ def call_claude(prompt: str) -> str | None:
 def _try_local_agent(agent: str, model_name: str, prompt: str, temperature: float = 0.7,
                      timeout: int | None = None,
                      num_predict: int = 4096) -> str | None:
-    """Tenta um modelo local com MAX_RETRIES + self-correction."""
+    """Tries a local model with MAX_RETRIES + self-correction."""
     last_output = None
     last_error  = None
 
     for attempt in range(1, MAX_RETRIES + 1):
-        # N9: aborta cascata se já houve threshold de timeouts no mesmo arquivo
+        # N9: abort cascade if threshold consecutive timeouts on same file
         if _consecutive_timeouts >= _TIMEOUT_ABORT_THRESHOLD:
             log(
-                f"  [{model_name}] abortando: {_consecutive_timeouts} timeouts "
-                f"consecutivos no arquivo — economizando wall-clock", "WARN",
+                f"  [{model_name}] aborting: {_consecutive_timeouts} consecutive "
+                f"timeouts on file — saving wall-clock", "WARN",
             )
             return None
         current_prompt = prompt
         if attempt > 1 and last_output and last_error:
-            log(f"  [{model_name}] autocorreção: {last_error[:60]}")
+            log(f"  [{model_name}] self-correction: {last_error[:60]}")
             current_prompt = _build_correction_prompt(prompt, last_output, last_error)
 
-        log(f"  [{model_name}] tentativa {attempt}/{MAX_RETRIES} (temp={temperature})")
+        log(f"  [{model_name}] attempt {attempt}/{MAX_RETRIES} (temp={temperature})")
         _live(current_model=model_name, active_skill="")
         raw, is_oom = call_model(model_name, current_prompt, temperature=temperature,
                                  timeout=timeout, num_predict=num_predict)
 
         if is_oom:
             _OOM_MODELS.add(model_name)
-            log(f"  [{model_name}] marcado como indisponível por OOM", "WARN")
+            log(f"  [{model_name}] marked unavailable due to OOM", "WARN")
             return None
 
         result = clean_output(raw)
         if result:
-            log(f"  [{model_name}] resposta válida obtida", "OK")
+            log(f"  [{model_name}] valid response obtained", "OK")
             return result
 
-        log(f"  [{model_name}] falhou", "WARN")
+        log(f"  [{model_name}] failed", "WARN")
         last_output = raw or ""
         last_error  = "Output did not contain a valid Java code block"
 
-    # Correção extra
+    # Extra correction pass
     if last_output and MAX_CORRECTIONS > 0:
         for correction in range(1, MAX_CORRECTIONS + 1):
-            log(f"  [{model_name}] correção extra {correction}/{MAX_CORRECTIONS}")
+            log(f"  [{model_name}] extra correction {correction}/{MAX_CORRECTIONS}")
             cp = _build_correction_prompt(prompt, last_output,
                                           last_error or "invalid output format")
             raw, is_oom = call_model(model_name, cp, timeout=timeout, num_predict=num_predict)
@@ -294,7 +290,7 @@ def _try_local_agent(agent: str, model_name: str, prompt: str, temperature: floa
                 return None
             result = clean_output(raw)
             if result:
-                log(f"  [{model_name}] autocorreção bem-sucedida", "OK")
+                log(f"  [{model_name}] self-correction succeeded", "OK")
                 return result
 
     return None
@@ -304,22 +300,22 @@ def _try_claude(prompt: str) -> str | None:
     if not CLAUDE_API_KEY:
         return None
     _live(current_model="claude-api", active_skill="")
-    log("  [claude-api] acionado")
+    log("  [claude-api] activated")
     raw    = call_claude(prompt)
     result = clean_output(raw)
     if result:
-        log("  [claude-api] resposta válida obtida", "OK")
+        log("  [claude-api] valid response obtained", "OK")
         return result
     if raw and MAX_CORRECTIONS > 0:
-        log("  [claude-api] autocorreção")
+        log("  [claude-api] self-correction")
         cp     = _build_correction_prompt(prompt, raw,
                                           "Output did not contain a valid Java code block")
         raw2   = call_claude(cp)
         result = clean_output(raw2)
         if result:
-            log("  [claude-api] autocorreção bem-sucedida", "OK")
+            log("  [claude-api] self-correction succeeded", "OK")
             return result
-    log("  [claude-api] falhou", "ERR")
+    log("  [claude-api] failed", "ERR")
     return None
 
 
@@ -330,12 +326,11 @@ def _try_claude(prompt: str) -> str | None:
 def _run_pipeline(prompt: str, code: str, file_path: str,
                   file_name: str, mode: str, phase: str = "",
                   max_agent: str | None = None) -> str | None:
-    """Pipeline completo de agentes com Skill de Revisão Crítica."""
+    """Full agent pipeline with Critical Review Skill."""
     global _last_successful_model
     file_type, complexity = analyze_file(code, file_path or file_name)
 
-    # Skill: Temperatura dinâmica
-    # SOLID/Arquitetura = more creative (0.7), Javadoc/Final = deterministic (0.1)
+    # Dynamic temperature: SOLID/Architecture = more creative (0.7), Javadoc/Final = deterministic (0.1)
     is_creative = any(x in phase.lower() for x in ("solid", "architecture", "patterns", "clean_code"))
     temp = 0.7 if is_creative else 0.1
 
@@ -363,7 +358,7 @@ def _run_pipeline(prompt: str, code: str, file_path: str,
 
     for agent in agent_priority:
         if agent == "claude":
-            # USE_CLAUDE_FALLBACK=false é hard block — nunca chamar Claude independente de falhas locais
+            # USE_CLAUDE_FALLBACK=false is a hard block — never call Claude regardless of local failures
             if USE_CLAUDE_FALLBACK and should_use_claude(file_type, complexity, mode, attempts_failed):
                 result = _try_claude(prompt)
                 if result: return result
@@ -378,7 +373,7 @@ def _run_pipeline(prompt: str, code: str, file_path: str,
                                   timeout=call_timeout, num_predict=call_num_predict)
         if result:
             _last_successful_model = model_name
-            # Polimento crítico: apenas em fases estruturais (SOLID/Architecture/Patterns)
+            # Critical polish: only in structural phases (SOLID/Architecture/Patterns)
             phase_name = phase.split("/")[-1].replace(".md", "") if phase else ""
             needs_polish = (
                 agent != "ultimate"
@@ -387,18 +382,18 @@ def _run_pipeline(prompt: str, code: str, file_path: str,
                 and MODEL_SOLID not in _OOM_MODELS
             )
             if needs_polish:
-                log(f"  [Crítico] Revisando com {MODEL_SOLID} (fase estrutural: {phase_name})...")
+                log(f"  [Critic] Reviewing with {MODEL_SOLID} (structural phase: {phase_name})...")
                 result = _polish_result(result, prompt, MODEL_SOLID)
 
             if result.strip() == code.strip() and agent in ("ultimate", "advanced", "standard"):
-                log(f"  [{agent}] indicou que nenhuma alteração é necessária.")
+                log(f"  [{agent}] indicated no changes are necessary.")
                 return result
             return result
 
         attempts_failed += 1
 
     if USE_CLAUDE_FALLBACK and "claude" not in agent_priority:
-        log("  [Fallback] Todos os agentes locais falharam, acionando Claude...", "WARN")
+        log("  [Fallback] All local agents failed, activating Claude...", "WARN")
         result = _try_claude(prompt)
         if result:
             _last_successful_model = "claude-api"
@@ -408,9 +403,7 @@ def _run_pipeline(prompt: str, code: str, file_path: str,
 
 
 def _polish_result(draft: str, original_prompt: str, critic_model: str) -> str:
-    """
-    Skill de Polimento: Usa o modelo mais forte para revisar e refinar o código.
-    """
+    """Polish Skill: uses the strongest model to review and refine generated code."""
     polish_prompt = (
         f"{original_prompt}\n\n"
         "### DRAFT FOR REVIEW\n"
@@ -427,21 +420,21 @@ def _polish_result(draft: str, original_prompt: str, critic_model: str) -> str:
         "Return ONLY the complete, polished and corrected Java file in ```java format."
     )
     
-    refined, _ = call_model(critic_model, polish_prompt, temperature=0.1) # Baixa temp para correção
+    refined, _ = call_model(critic_model, polish_prompt, temperature=0.1)  # Low temp for corrections
     clean_refined = clean_output(refined)
-    
+
     if clean_refined:
-        log(f"  [{critic_model}] Revisão concluída e aplicada.", "OK")
+        log(f"  [{critic_model}] Review completed and applied.", "OK")
         return clean_refined
-    
-    return draft # Se falhou a revisão, mantém o original
+
+    return draft  # If review failed, keep the original
 
 
 def call_ai(code: str, rules: str, mode: str, file_name: str,
             file_path: str = "", phase: str = "",
             dep_context: str = "",
             max_agent: str | None = None) -> str | None:
-    """Entrada principal — gera código a partir das regras da fase."""
+    """Main entry point — generates code from phase rules."""
     from ai.compressor import maybe_compress
     compressed_dep = maybe_compress(dep_context) if dep_context else dep_context
     prompt = build_prompt(code, rules, mode, file_name, dep_context=compressed_dep)
@@ -453,10 +446,10 @@ def call_ai_with_correction(original: str, rules: str, mode: str,
                              bad_output: str, error_reason: str,
                              phase: str = "",
                              dep_context: str = "") -> str | None:
-    """Entrada para correção após rejeição do validator."""
+    """Entry point for correction after validator rejection."""
     base_prompt = build_prompt(original, rules, mode, file_name, dep_context=dep_context)
-    # B: passa file_name como expected_class para que o mandatory block use o nome do arquivo de
-    # destino (ex: MerchantCategoryCodesServiceImplTest), não o nome da classe de produção.
+    # B: passes file_name as expected_class so the mandatory block uses the destination
+    # file name (e.g. MerchantCategoryCodesServiceImplTest), not the production class name.
     correction_prompt = _build_validator_correction_prompt(
         base_prompt, bad_output, error_reason,
         original_code=original, expected_class=file_name.replace(".java", ""),
@@ -464,13 +457,13 @@ def call_ai_with_correction(original: str, rules: str, mode: str,
     call_num_predict = 8192 if mode == "test" else 4096
 
     if USE_CLAUDE_FALLBACK:
-        log("  [Autocura] Acionando Claude para correção avançada...", "INFO")
+        log("  [Self-heal] Activating Claude for advanced correction...", "INFO")
         result = _try_claude(correction_prompt)
         if result:
             return result
-        log("  [Autocura] Claude indisponível ou falhou.", "WARN")
+        log("  [Self-heal] Claude unavailable or failed.", "WARN")
 
-    log(f"  [Autocura] Acionando Médico Local (Second Opinion) com {MODEL_RECOVERY}...", "WARN")
+    log(f"  [Self-heal] Activating Local Doctor (Second Opinion) with {MODEL_RECOVERY}...", "WARN")
     call_timeout = TIMEOUT_TEST if mode == "test" else TIMEOUT
     recovery_result = _try_local_agent("recovery", MODEL_RECOVERY, correction_prompt,
                                        temperature=0.1, timeout=call_timeout,
@@ -482,13 +475,13 @@ def call_ai_with_correction(original: str, rules: str, mode: str,
     # N3: escalate to MODEL_STRUCT (smaller, faster) when MODEL_RECOVERY exhausts.
     # Skip if both env vars point to the same model — no point retrying identical.
     if MODEL_STRUCT and MODEL_STRUCT != MODEL_RECOVERY:
-        log(f"  [Autocura] Escalando para modelo menor ({MODEL_STRUCT}) após {MODEL_RECOVERY} falhar...", "WARN")
+        log(f"  [Self-heal] Escalating to smaller model ({MODEL_STRUCT}) after {MODEL_RECOVERY} failed...", "WARN")
         struct_result = _try_local_agent("recovery-fallback", MODEL_STRUCT, correction_prompt,
                                           temperature=0.1, timeout=call_timeout,
                                           num_predict=call_num_predict)
         if struct_result:
-            log(f"  [Autocura] {MODEL_STRUCT} (fallback) gerou correção válida.", "OK")
+            log(f"  [Self-heal] {MODEL_STRUCT} (fallback) produced valid correction.", "OK")
             return struct_result
 
-    log("  [Autocura] Médico Local também falhou.", "ERR")
+    log("  [Self-heal] Local Doctor also failed.", "ERR")
     return None

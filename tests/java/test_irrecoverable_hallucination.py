@@ -100,7 +100,7 @@ def test_extracts_class_name_correctly():
 
 
 # ---------------------------------------------------------------------------
-# Opção 9: hallucination detection via test_code scan
+# Option 9: hallucination detection via test_code scan
 # ---------------------------------------------------------------------------
 
 

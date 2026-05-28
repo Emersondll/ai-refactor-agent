@@ -1,7 +1,7 @@
 import os
 from core.logger import log
 from core.utils import run_cmd
-from java.compiler import ENV_WRAPPER
+from java.maven_build import ENV_WRAPPER
 from config import GJF_PATH
 
 
@@ -35,6 +35,17 @@ def _run_openrewrite(repo_path: str, artifact_coordinates: list, recipes: list) 
     code, out, err = run_cmd(full_cmd, cwd=repo_path)
     if code != 0:
         log(f"[CommunityRunner] OpenRewrite exited {code}: {err[:200]}", "WARN")
+
+
+def format_single_file(file_path: str, repo_path: str) -> None:
+    """Run GJF on a single file after a successful LLM phase write.
+
+    Best-effort: logs a warning on failure but never raises so it cannot
+    block the pipeline.
+    """
+    code, _, err = run_cmd(f'{GJF_PATH} --replace "{file_path}"', cwd=repo_path)
+    if code != 0:
+        log(f"[GJF] Could not format {os.path.basename(file_path)}: {err[:200]}", "WARN")
 
 
 def _run_google_java_format(repo_path: str) -> None:

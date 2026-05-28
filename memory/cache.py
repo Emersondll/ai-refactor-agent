@@ -1,9 +1,9 @@
 """
-memory/cache.py — Motor de cache para redução de tokens.
+memory/cache.py — Cache engine for token reduction.
 
-Dep context: persiste em disco por hash do conteúdo do arquivo.
-Phase tracking: em memória por run (zerado a cada nova instância).
-Project dict: em memória + disco para reutilização entre runs.
+Dep context: persisted to disk by file content hash.
+Phase tracking: in-memory per run (reset each time a new instance is created).
+Project dict: in-memory + disk for reuse across runs.
 """
 
 import hashlib
@@ -22,16 +22,16 @@ class Cache:
         repo_key = hashlib.sha256(repo_abs.encode()).hexdigest()[:8]
         self._base = os.path.join(repo_abs, ".refactor_cache", repo_key)
         self._dep_dir = os.path.join(self._base, "dep_ctx")
-        # S1: diretório de fases persistentes — chaveado por (file_hash, phase, content_hash)
+        # Persistent phase directory — keyed by (file_hash, phase, content_hash)
         self._phase_dir = os.path.join(self._base, "phases")
         os.makedirs(self._dep_dir, exist_ok=True)
         os.makedirs(self._phase_dir, exist_ok=True)
 
-        # In-memory: aceleração para o run atual
+        # In-memory: speed boost for the current run
         self._phase_done: dict[str, set[str]] = {}
         self._project_dict: Optional[str] = None
 
-    # --- Dep context (disco, keyed by file content hash) ---
+    # --- Dep context (disk, keyed by file content hash) ---
 
     def get_dep_context(self, file_hash: str) -> Optional[str]:
         path = os.path.join(self._dep_dir, f"{file_hash}.txt")
@@ -53,12 +53,12 @@ class Cache:
     def is_phase_done(self, file_path: str, phase_name: str) -> bool:
         if phase_name in self._phase_done.get(file_path, set()):
             return True
-        # S1: verifica disco — True se o hash do arquivo coincide com o do último sucesso
+        # S1: check disk — True if the file hash matches the last successful hash
         return self._disk_phase_matches(file_path, phase_name)
 
     def mark_phase_done(self, file_path: str, phase_name: str) -> None:
         self._phase_done.setdefault(file_path, set()).add(phase_name)
-        # S1: persiste no disco com hash do conteúdo atual do arquivo
+        # S1: persist to disk with the hash of the current file content
         self._persist_phase(file_path, phase_name)
 
     def _phase_key(self, file_path: str, phase_name: str) -> str:
@@ -98,7 +98,7 @@ class Cache:
         self._phase_done.setdefault(key, set()).add(phase_name)
 
     def done_method_keys(self, file_path: str, phase_name: str) -> set[str]:
-        """Retorna todas as chaves de método já processadas para um arquivo/fase."""
+        """Returns all method keys already processed for a given file/phase."""
         prefix = f"{file_path}#"
         return {
             k[len(prefix):]

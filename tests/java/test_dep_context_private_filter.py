@@ -1,5 +1,5 @@
 import pytest
-from java.context import _extract_simplified_header
+from java.dep_context import _extract_simplified_header
 
 
 CLASS_WITH_PRIVATE = '''package com.example;

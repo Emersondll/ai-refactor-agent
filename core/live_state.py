@@ -1,8 +1,8 @@
 """
-core/live_state.py — Estado ao vivo partilhado entre pipeline e dashboard.
+core/live_state.py — Live state shared between pipeline and dashboard.
 
-Grava logs/live_state.json com o modelo e skill ativos no momento.
-Gravação é best-effort: falhas silenciosas para não interromper o pipeline.
+Writes logs/live_state.json with the currently active model and skill.
+Write is best-effort: silent failures to avoid interrupting the pipeline.
 """
 
 import json

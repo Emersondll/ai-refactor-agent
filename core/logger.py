@@ -1,20 +1,18 @@
 # core/logger.py
 #
-# Logger de terminal — saída em tempo real durante execução.
-# Usado em todo o projeto: model.py, refactor.py, repo.py, main.py, etc.
+# Terminal logger — real-time output during execution.
+# Used throughout the project: model.py, refactor.py, repo.py, main.py, etc.
 #
-# NÃO persiste em arquivo. Para rastreamento auditável em arquivo,
-# use execution_logger.py.
+# Does NOT persist to file. For auditable file tracking, use execution_logger.py.
 
 from datetime import datetime
 
 
 def log(msg: str, level: str = "INFO") -> None:
-    """
-    Imprime uma linha formatada no terminal.
+    """Prints a formatted line to the terminal.
 
     Args:
-        msg:   mensagem a exibir
+        msg:   message to display
         level: INFO | OK | WARN | ERR | PHASE
     """
     icons = {

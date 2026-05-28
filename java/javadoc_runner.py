@@ -1,16 +1,16 @@
 """
-java/javadoc_runner.py — Insere Javadoc em todos os métodos públicos.
+java/javadoc_runner.py — Inserts Javadoc on all public methods.
 
-Fluxo por arquivo:
-  1. Lê o arquivo Java completo
-  2. Envia ao LLM com instruções de documentação
-  3. LLM adiciona /** */ onde falta, sem tocar no corpo dos métodos
-  4. mvn compile — aceita ou reverte
-  5. Emite eventos para o dashboard (FILE_ACCEPTED / FILE_REVERTED / FILE_SKIPPED)
+Per-file flow:
+  1. Read the full Java file
+  2. Send to the LLM with documentation instructions
+  3. LLM adds /** */ where missing, without touching method bodies
+  4. mvn compile — accept or revert
+  5. Emit events for the dashboard (FILE_ACCEPTED / FILE_REVERTED / FILE_SKIPPED)
 
-Resiliência:
-  - Cada arquivo processa em thread daemon com timeout de FILE_TIMEOUT_SECS
-  - Exceções por arquivo não interrompem o loop principal
+Resilience:
+  - Each file is processed in a daemon thread with FILE_TIMEOUT_SECS timeout
+  - Per-file exceptions do not interrupt the main loop
 """
 
 import os
@@ -23,29 +23,30 @@ from core.utils import read_file, write_file, run_cmd, load_skill
 from ai.model import call_ai, call_model
 from ai.sanitizer import clean_output
 from java.refactor import get_java_files
-from java.compiler import ENV_WRAPPER
+from java.maven_build import ENV_WRAPPER
+from java.community_runner import format_single_file
 
 SKILL_ID = "javadoc"
-FILE_TIMEOUT_SECS = 300  # 5 minutos por arquivo
+FILE_TIMEOUT_SECS = 300  # 5 minutes per file
 
-# C4: classes de bootstrap/configuração Spring não devem receber Javadoc (mesma regra do method_runner)
+# C4: Spring bootstrap/config classes must not receive Javadoc (same rule as method_runner)
 _BOOTSTRAP_RE = re.compile(r'@(SpringBootApplication|Configuration|SpringBootTest)\b')
 
 
 def run_javadoc(repo_path: str, exec_logger=None) -> None:
-    """Percorre todos os arquivos Java de produção e insere Javadoc nos métodos públicos."""
+    """Iterates over all production Java files and inserts Javadoc on public methods."""
     rules = load_skill("java-javadoc", section="LLM INSTRUCTIONS")
     if not rules:
-        log("[Javadoc] Skill 'java-javadoc' não encontrada — pulando fase", "WARN")
+        log("[Javadoc] Skill 'java-javadoc' not found — skipping phase", "WARN")
         return
 
     java_files = get_java_files(repo_path, tests=False)
-    log(f"[Javadoc] {len(java_files)} arquivos candidatos")
+    log(f"[Javadoc] {len(java_files)} candidate files")
     _live(active_skill=SKILL_ID, current_file="")
 
-    # C3: salva conteúdo pré-javadoc de cada arquivo ANTES de lançar o thread.
-    # Em caso de timeout o daemon pode ter escrito código parcial — restauramos o
-    # conteúdo salvo (não o git), preservando refatorações de fases anteriores.
+    # C3: save pre-javadoc content for each file BEFORE launching the thread.
+    # On timeout the daemon may have written partial code — restore the saved
+    # content (not from git), preserving refactoring from earlier phases.
     pre_javadoc: dict[str, str] = {}
 
     for file_path in java_files:
@@ -60,16 +61,16 @@ def run_javadoc(repo_path: str, exec_logger=None) -> None:
             t.start()
             t.join(FILE_TIMEOUT_SECS)
             if t.is_alive():
-                log(f"  [javadoc] {file_name} — timeout ({FILE_TIMEOUT_SECS}s), pulando", "WARN")
-                # Restaura o conteúdo anterior ao javadoc (preserva fases já aplicadas)
+                log(f"  [javadoc] {file_name} — timeout ({FILE_TIMEOUT_SECS}s), skipping", "WARN")
+                # Restore pre-javadoc content (preserve refactoring from earlier phases)
                 saved = pre_javadoc.get(file_path, "")
                 if saved:
                     write_file(file_path, saved)
-                    log(f"  [javadoc] {file_name} — conteúdo pré-javadoc restaurado", "WARN")
+                    log(f"  [javadoc] {file_name} — pre-javadoc content restored", "WARN")
                 if exec_logger:
                     exec_logger.log_file_skipped(SKILL_ID, file_name, "timeout")
         except Exception as exc:
-            log(f"  [javadoc] {file_name} — erro inesperado: {exc}", "WARN")
+            log(f"  [javadoc] {file_name} — unexpected error: {exc}", "WARN")
             if exec_logger:
                 exec_logger.log_file_skipped(SKILL_ID, file_name, "error")
 
@@ -77,30 +78,30 @@ def run_javadoc(repo_path: str, exec_logger=None) -> None:
 
 
 def _process_one_file(file_path: str, rules: str, repo_path: str, exec_logger) -> None:
-    """Processa um único arquivo Java — inserção de Javadoc. Executado em thread daemon."""
+    """Processes a single Java file — inserts Javadoc. Runs in a daemon thread."""
     file_name = os.path.basename(file_path)
     code = read_file(file_path)
     if not code:
         return
 
-    # C4: classes de bootstrap/configuração não devem receber Javadoc
+    # C4: bootstrap/config classes must not receive Javadoc
     if _BOOTSTRAP_RE.search(code):
-        log(f"  [javadoc] {file_name} — classe bootstrap/config, pulando")
+        log(f"  [javadoc] {file_name} — bootstrap/config class, skipping")
         if exec_logger:
             exec_logger.log_file_skipped(SKILL_ID, file_name, "bootstrap_class")
         return
 
-    # C: @Document/@Entity/record/enum são data holders sem lógica de negócio relevante.
-    # Ambos os modelos (J1 primary e retry) modificam código estruturalmente nesses tipos →
-    # pular evita code_structure_changed cascata e tempo desperdiçado.
+    # C: @Document/@Entity/record/enum are data holders with no relevant business logic.
+    # Both models (J1 primary and retry) modify these types structurally →
+    # skipping avoids cascading code_structure_changed and wasted time.
     if re.search(r'@(Document|Entity|Table)\b', code) or re.search(r'\b(record|enum)\b', code):
-        log(f"  [javadoc] {file_name} — data holder (@Document/record/enum), pulando")
+        log(f"  [javadoc] {file_name} — data holder (@Document/record/enum), skipping")
         if exec_logger:
             exec_logger.log_file_skipped(SKILL_ID, file_name, "data_holder")
         return
 
     if _all_public_methods_documented(code):
-        log(f"  [javadoc] {file_name} — já documentado, pulando")
+        log(f"  [javadoc] {file_name} — already documented, skipping")
         if exec_logger:
             exec_logger.log_file_skipped(SKILL_ID, file_name, "already_documented")
         return
@@ -117,17 +118,17 @@ def _process_one_file(file_path: str, rules: str, repo_path: str, exec_logger) -
     )
 
     if not new_code or _normalize(new_code) == _normalize(code):
-        log(f"  [javadoc] {file_name} — sem alteração")
+        log(f"  [javadoc] {file_name} — no change")
         if exec_logger:
             exec_logger.log_file_skipped(SKILL_ID, file_name, "no_change")
         return
 
-    # C1: verificação de integridade estrutural — LLM só pode ter adicionado comentários
+    # C1: structural integrity check — LLM may only have added comments
     if _strip_comments(new_code) != _strip_comments(code):
-        log(f"  [javadoc] {file_name} — LLM modificou código além dos comentários, tentando modelo code-specialized...", "WARN")
+        log(f"  [javadoc] {file_name} — LLM modified code beyond comments, retrying with code-specialized model...", "WARN")
 
-        # J1: retry com MODEL_STRUCT (qwen2.5-coder:7b) antes de rejeitar — neural-chat:7b
-        # modifica código sistematicamente; código-especializado respeita melhor o scope.
+        # J1: retry with MODEL_STRUCT (qwen2.5-coder:7b) before rejecting — neural-chat:7b
+        # modifies code systematically; a code-specialized model respects scope better.
         from config import MODEL_STRUCT
         from ai.prompt import build_prompt
         _retry_rules = (
@@ -141,13 +142,13 @@ def _process_one_file(file_path: str, rules: str, repo_path: str, exec_logger) -
         _retry_code = clean_output(_raw2)
 
         if _retry_code and _strip_comments(_retry_code) == _strip_comments(code):
-            log(f"  [javadoc] {file_name} — retry com {MODEL_STRUCT} aceito ✓", "OK")
+            log(f"  [javadoc] {file_name} — retry with {MODEL_STRUCT} accepted ✓", "OK")
             new_code = _retry_code
         else:
-            log(f"  [javadoc] {file_name} — retry também modificou código, rejeitando", "WARN")
+            log(f"  [javadoc] {file_name} — retry also modified code, rejecting", "WARN")
             if exec_logger:
                 exec_logger.log_file_skipped(SKILL_ID, file_name, "code_structure_changed")
-            # S3: acumula no FailedFilesTracker → permanent_skip após 3 ciclos consecutivos
+            # S3: accumulate in FailedFilesTracker → permanent_skip after 3 consecutive cycles
             from java.refactor import get_failed_tracker as _get_ft
             _get_ft().record(file_path, SKILL_ID, "code_structure_changed")
             return
@@ -155,18 +156,19 @@ def _process_one_file(file_path: str, rules: str, repo_path: str, exec_logger) -
     write_file(file_path, new_code)
     rc, _, _ = run_cmd(ENV_WRAPPER.format("mvn compile -q"), cwd=repo_path)
     if rc == 0:
-        log(f"  [javadoc] {file_name} — aceito ✓", "OK")
+        format_single_file(file_path, repo_path)
+        log(f"  [javadoc] {file_name} — accepted ✓", "OK")
         if exec_logger:
             exec_logger.log_file_accepted(SKILL_ID, file_name, "+javadoc")
     else:
-        log(f"  [javadoc] {file_name} — compile falhou, revertendo", "WARN")
+        log(f"  [javadoc] {file_name} — compile failed, reverting", "WARN")
         write_file(file_path, code)
         if exec_logger:
             exec_logger.log_file_reverted(SKILL_ID, file_name, "compile_failed")
 
 
 # ---------------------------------------------------------------------------
-# Heurística: verifica se todos os métodos públicos visíveis já têm Javadoc
+# Heuristic: check whether all visible public methods already have Javadoc
 # ---------------------------------------------------------------------------
 
 _RE_METHOD_LINE = re.compile(
@@ -178,8 +180,8 @@ _RE_METHOD_LINE = re.compile(
 
 def _all_public_methods_documented(code: str) -> bool:
     """
-    Retorna True se todos os métodos públicos visíveis já têm Javadoc.
-    Usa scan linha a linha para evitar lookbehind de comprimento variável.
+    Returns True if all visible public methods already have Javadoc.
+    Uses a line-by-line scan to avoid variable-length lookbehind.
     """
     lines = code.splitlines()
     total = 0
@@ -189,14 +191,14 @@ def _all_public_methods_documented(code: str) -> bool:
         if not _RE_METHOD_LINE.match(stripped):
             continue
         total += 1
-        # Verifica até 6 linhas anteriores em busca de fim de javadoc
+        # Look back up to 6 lines for the end of a Javadoc block
         for j in range(i - 1, max(-1, i - 7), -1):
             prev = lines[j].strip()
-            # Fim de javadoc multi-linha ('*/') ou javadoc de linha única ('/** ... */')
+            # End of multi-line Javadoc ('*/') or single-line Javadoc ('/** ... */')
             if prev.endswith('*/') and (prev == '*/' or prev.startswith('/*')):
                 documented += 1
                 break
-            # Para de procurar se encontrar código não-Javadoc (não é anotação nem comentário)
+            # Stop searching if non-Javadoc code found (not an annotation or comment)
             if prev and not prev.startswith('*') and not prev.startswith('/*') and not prev.startswith('@'):
                 break
     if total == 0:
@@ -205,13 +207,13 @@ def _all_public_methods_documented(code: str) -> bool:
 
 
 def _strip_comments(code: str) -> str:
-    """Remove todos os comentários Java para comparação estrutural.
-    Permite detectar se o LLM alterou código além de adicionar /** */ blocks."""
-    # Remove comentários de bloco (/** ... */ e /* ... */)
+    """Removes all Java comments for structural comparison.
+    Detects whether the LLM changed code beyond adding /** */ blocks."""
+    # Remove block comments (/** ... */ and /* ... */)
     stripped = re.sub(r'/\*.*?\*/', '', code, flags=re.DOTALL)
-    # Remove comentários de linha (//)
+    # Remove line comments (//)
     stripped = re.sub(r'//[^\n]*', '', stripped)
-    # Normaliza espaços para comparação robusta
+    # Normalize whitespace for robust comparison
     return re.sub(r'\s+', ' ', stripped.strip())
 
 

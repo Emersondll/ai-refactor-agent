@@ -1,10 +1,8 @@
 """
-agent_router.py — Localização: ai/agent_router.py
+agent_router.py — Location: ai/agent_router.py
 
-ATUALIZADO:
-  - Adicionado "gemma" como 4º agente local na rota
-  - dolphin agora aponta para qwen3.5 via config (transparente aqui)
-  - Rota padrão: neural-chat → mistral → dolphin → gemma → claude
+Routes each file to the appropriate model priority list based on file type,
+complexity, and phase intent (documentation, architecture, test generation).
 """
 
 import re
@@ -22,9 +20,9 @@ class FileType(Enum):
 
 
 class FileComplexity(Enum):
-    SIMPLE = 1   # < 50 linhas
-    MEDIUM = 2   # 50-150 linhas
-    LARGE  = 3   # > 150 linhas
+    SIMPLE = 1   # < 50 lines
+    MEDIUM = 2   # 50-150 lines
+    LARGE  = 3   # > 150 lines
 
 
 def analyze_file(code: str, file_path: str) -> tuple[FileType, FileComplexity]:
@@ -60,34 +58,31 @@ def analyze_file(code: str, file_path: str) -> tuple[FileType, FileComplexity]:
 
 def select_agent_priority(file_type: FileType, complexity: FileComplexity,
                           mode: str, phase: str = "") -> list[str]:
-    """
-    Retorna rota de agentes em ordem de prioridade.
-    Otimiza o uso de modelos baseando-se na INTENÇÃO da fase.
-    """
+    """Returns agent route in priority order, optimized by phase intent."""
     phase_lower = phase.lower()
-    
-    # 1. Prioridade por intenção da fase (Override)
+
+    # 1. Phase-intent override
     if "javadoc" in phase_lower or "documentation" in phase_lower:
-        # Documentação: light primeiro, depois standard. Evita usar o modelo mais pesado.
+        # Documentation: light first, then standard — avoids loading the heaviest model.
         return ["light", "standard", "advanced", "claude"]
-    
+
     if "solid" in phase_lower or "architecture" in phase_lower or "patterns" in phase_lower:
-        # Arquitetura: Ultimate/Advanced primeiro.
+        # Architecture: Ultimate/Advanced first.
         return ["ultimate", "advanced", "standard", "claude"]
 
     if mode == "test" or "test" in phase_lower:
-        # gemma4(advanced) primário — 14b(ultimate) fallback — 7b(standard) último recurso
-        # 14b reintroduzido: gera código de qualidade superior ao 7b; OOM era em modo refatoração,
-        # não em modo teste onde os arquivos são menores e o contexto é mais limitado
+        # advanced (14b) primary — ultimate fallback — standard last resort.
+        # 14b reintroduced: produces better code than 7b; OOM was in refactor mode,
+        # not in test mode where files are smaller and context is more constrained.
         if complexity == FileComplexity.SIMPLE:
             return ["advanced", "standard", "claude"]
         return ["advanced", "ultimate", "standard", "claude"]
 
-    # 2. Casos críticos por tamanho
+    # 2. Critical cases by size
     if complexity == FileComplexity.LARGE:
         return ["ultimate", "advanced", "standard", "claude"]
 
-    # 3. Mapeamento padrão por tipo de arquivo
+    # 3. Default routing by file type
     routing_map = {
         FileType.REPOSITORY: ["ultimate", "advanced", "standard", "claude"],
         FileType.SERVICE:    ["ultimate", "advanced", "standard", "claude"],
@@ -101,8 +96,8 @@ def select_agent_priority(file_type: FileType, complexity: FileComplexity,
 
 def should_use_claude(file_type: FileType, complexity: FileComplexity,
                       mode: str, attempts_failed: int) -> bool:
-    # Nota: USE_CLAUDE_FALLBACK=false é hard block em _run_pipeline — esta função
-    # só é consultada quando a flag está true ou todos os locais falharam
+    # Note: USE_CLAUDE_FALLBACK=false is a hard block in _run_pipeline — this function
+    # is only consulted when the flag is true or all local models failed.
     if complexity == FileComplexity.LARGE:
         return True
     if file_type == FileType.SERVICE and complexity in (FileComplexity.MEDIUM, FileComplexity.LARGE):

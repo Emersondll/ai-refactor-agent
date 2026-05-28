@@ -39,7 +39,7 @@ public class Ctrl {
     public ResponseEntity<X> doIt(Y in) { return ResponseEntity.ok().body(svc.call(in)); }
 }'''
     out = _build(code)
-    # Regra precisa avisar sobre mocks
+    # Rule must warn about mocks
     upper = out.upper()
     assert "MOCK" in upper or "thenReturn" in out
 
@@ -53,7 +53,7 @@ public class Ctrl {
     public ResponseEntity<X> doIt(Y in) { return ResponseEntity.ok().body(svc.call(in)); }
 }'''
     out = _build(code)
-    # A regra deve mencionar assertNull no contexto desse padrão
+    # The rule must mention assertNull in the context of this pattern
     assert "assertNull" in out
 
 

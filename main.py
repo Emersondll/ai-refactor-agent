@@ -1,5 +1,5 @@
 """
-main.py — Localização: raiz do projeto (ai-refactor-agent/)
+main.py — Location: project root (ai-refactor-agent/)
 """
 
 import argparse
@@ -18,8 +18,8 @@ from memory.cache import Cache
 from memory.semantic_memory import SemanticMemory
 from java.refactor import generate_tests, get_java_files, get_failed_tracker, FailedFilesTracker
 from java.fix_metadata import get_fixes
-from java.compiler import get_global_coverage, maven_test_with_coverage, maven_test
-from java.sanitizer import run_sanitization
+from java.maven_build import get_global_coverage, maven_test_with_coverage, maven_test
+from java.dead_code_sanitizer import run_sanitization
 
 
 def _parse_cli_args() -> argparse.Namespace | None:
@@ -118,33 +118,33 @@ def main():
             _cmd_clear_all_skips()
         return  # exit without starting pipeline
 
-    # B2: limpa estado ao vivo do run anterior antes de qualquer coisa
+    # B2: reset live state from previous run before anything else
     from core.live_state import update as _live_reset
     _live_reset(active_skill="", current_model="", current_file="")
 
     log("=" * 60, "PHASE")
-    log("AI Refactor Orchestrator — Dashboard Ativo", "PHASE")
+    log("AI Refactor Orchestrator — Dashboard Active", "PHASE")
     log("=" * 60, "PHASE")
 
     reporter    = PhaseReporter()
     exec_logger = ExecutionLogger(LOGS_DIR)
 
-    # --- Iniciar Servidor do Dashboard em Background ---
+    # --- Start Dashboard Server in Background ---
     def start_dashboard_server():
         try:
-            # Tenta liberar a porta 8000 se estiver ocupada
+            # Free port 8000 if already in use
             subprocess.run(["fuser", "-k", "8000/tcp"], capture_output=True)
             subprocess.Popen(["python3", "-m", "http.server", "8000"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            log("Dashboard Server: ATIVO em http://localhost:8000/dashboard.html", "OK")
+            log("Dashboard Server: ACTIVE at http://localhost:8000/dashboard.html", "OK")
         except:
-            log("Não foi possível iniciar o servidor do Dashboard automaticamente.", "WARN")
+            log("Could not start Dashboard server automatically.", "WARN")
 
     def start_data_updater():
         while True:
             try:
                 subprocess.run(["python3", "dashboard/data.py"], capture_output=True)
             except: pass
-            time.sleep(10) # Atualiza o JSON a cada 10s
+            time.sleep(10)  # Update JSON every 10s
 
     # M15: warn about recent `fix:` commits not registered in fix_metadata.json
     try:
@@ -152,21 +152,21 @@ def main():
         _missing = audit_fix_metadata()
         if _missing:
             log(
-                f"[fix_metadata] {len(_missing)} commit(s) `fix:` recente(s) "
-                f"sem entrada em logs/fix_metadata.json: {', '.join(_missing[:10])}",
+                f"[fix_metadata] {len(_missing)} recent `fix:` commit(s) "
+                f"not registered in logs/fix_metadata.json: {', '.join(_missing[:10])}",
                 "WARN",
             )
             log(
-                "[fix_metadata] Considere `register_fix(...)` para que M3 "
-                "(auto-expire) consiga aplicar.",
+                "[fix_metadata] Consider `register_fix(...)` so that M3 "
+                "(auto-expire) can apply it.",
                 "INFO",
             )
     except Exception:
         pass  # never break boot over an audit
 
-    repo = input("Repo URL ou caminho local: ").strip()
+    repo = input("Repo URL or local path: ").strip()
     if not repo:
-        log("Nenhum repositório informado.", "ERR")
+        log("No repository provided.", "ERR")
         return
 
     threading.Thread(target=start_dashboard_server, daemon=True).start()
@@ -174,51 +174,51 @@ def main():
 
     os.makedirs(REPOS_DIR, exist_ok=True)
 
-    log("Clonando/atualizando repositório...", "PHASE")
+    log("Cloning/updating repository...", "PHASE")
     if repo.startswith("http") or repo.startswith("git@"):
         repo_path, branch_name = clone_or_update(repo, REPOS_DIR)
         if not repo_path or not branch_name:
-            log("Falha ao clonar/atualizar repositório", "ERR")
+            log("Failed to clone/update repository", "ERR")
             return
     else:
         repo_path = os.path.abspath(repo)
         if not os.path.isdir(repo_path):
-            log(f"Caminho não encontrado: {repo_path}", "ERR")
+            log(f"Path not found: {repo_path}", "ERR")
             return
         from datetime import datetime
         branch_name = f"refactor/ai-{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
-    log(f"Repositório: {repo_path}", "OK")
+    log(f"Repository: {repo_path}", "OK")
     log(f"Branch: {branch_name}", "OK")
 
     exec_logger.log_git_branch_created(branch_name)
 
-    # Limpa falhas de runs anteriores para não bloquear arquivos fixáveis
+    # Clear failures from previous runs so fixable files are not blocked
     get_failed_tracker(LOGS_DIR).reset()
 
     if not os.path.isdir(PHASES_DIR):
-        log(f"Diretório '{PHASES_DIR}/' não encontrado.", "ERR")
+        log(f"Directory '{PHASES_DIR}/' not found.", "ERR")
         return
 
-    # --- Health Check Inicial ---
-    log("Executando Health Check (Validação de Testes Existentes)...", "PHASE")
-    exec_logger.log_phase_start("HEALTH_CHECK", "Validação de Testes Existentes")
+    # --- Initial Health Check ---
+    log("Running Health Check (Existing Tests Validation)...", "PHASE")
+    exec_logger.log_phase_start("HEALTH_CHECK", "Existing Tests Validation")
     success, output = maven_test(repo_path)
     if not success:
-        log("AVISO: O projeto já possui testes QUEBRADOS no estado inicial.", "WARN")
+        log("WARNING: Project already has BROKEN tests in its initial state.", "WARN")
     else:
-        log("Health Check: PROJETO SAUDÁVEL ✓", "OK")
+        log("Health Check: PROJECT HEALTHY ✓", "OK")
 
-    # --- Auditoria de Cobertura Inicial ---
-    log("Iniciando Auditoria de Cobertura...", "PHASE")
-    exec_logger.log_phase_start("AUDIT_COVERAGE", "Auditoria de Cobertura Inicial")
+    # --- Initial Coverage Audit ---
+    log("Starting Coverage Audit...", "PHASE")
+    exec_logger.log_phase_start("AUDIT_COVERAGE", "Initial Coverage Audit")
     success, _, _, _ = maven_test_with_coverage(repo_path, "")
     global_cov = get_global_coverage(repo_path)
     exec_logger.log_coverage(global_cov)
-    log(f"Cobertura Global de Testes: {global_cov:.2f}%", "OK" if global_cov >= 90.0 else "WARN")
+    log(f"Global Test Coverage: {global_cov:.2f}%", "OK" if global_cov >= 90.0 else "WARN")
 
     if global_cov < 90.0:
-        log(f"COBERTURA INSUFICIENTE ({global_cov:.2f}% < 90%). Ativando Geração Autônoma de Testes (Skill: java-tdd-unit-test)...", "WARN")
+        log(f"INSUFFICIENT COVERAGE ({global_cov:.2f}% < 90%). Activating Autonomous Test Generation (Skill: java-tdd-unit-test)...", "WARN")
         from core.utils import load_skill
         rules_test = load_skill("java-tdd-unit-test", section="LLM INSTRUCTIONS")
         if not rules_test:
@@ -230,41 +230,41 @@ def main():
             )
         generate_tests(repo_path, "initial_coverage_fix", rules_test, reporter, exec_logger)
 
-        # Gate: revalida cobertura após geração — refatoração só prossegue com ≥ 90%
+        # Gate: revalidate coverage after generation — refactoring only proceeds with ≥ 90%
         success, _, _, _ = maven_test_with_coverage(repo_path, "")
         global_cov = get_global_coverage(repo_path)
-        exec_logger.log_coverage(global_cov, "Cobertura Pós-Geração de Testes")
-        log(f"Cobertura após geração: {global_cov:.2f}%", "OK" if global_cov >= 90.0 else "WARN")
+        exec_logger.log_coverage(global_cov, "Post-Test-Generation Coverage")
+        log(f"Coverage after generation: {global_cov:.2f}%", "OK" if global_cov >= 90.0 else "WARN")
 
         if global_cov < 90.0:
-            log(f"ATENÇÃO: Cobertura {global_cov:.2f}% abaixo de 90% após geração autônoma.", "WARN")
-            log("Verifique failed_files.json para classes que não atingiram a meta.", "WARN")
-            log("Prosseguindo para refatoração — testes existentes protegem o comportamento atual.", "WARN")
+            log(f"WARNING: Coverage {global_cov:.2f}% below 90% after autonomous generation.", "WARN")
+            log("Check failed_files.json for classes that did not reach the target.", "WARN")
+            log("Proceeding to refactoring — existing tests protect current behavior.", "WARN")
 
-    # A2: guarda cobertura pré-refatoração para gate no final
+    # A2: store pre-refactoring coverage for the final gate check
     _coverage_before_refactor = global_cov
 
-    # --- Cache de tokens (dep context + phase skip) ---
+    # --- Token cache (dep context + phase skip) ---
     cache        = Cache(repo_path)
     semantic_mem = SemanticMemory()
 
-    # --- Refatoração: Agent Loop ou Pipeline fixo ---
+    # --- Refactoring: Agent Loop or Fixed Pipeline ---
     _all_java_files = get_java_files(repo_path)
     exec_logger.log_files_total(len(_all_java_files))
     exec_logger.log_files_queue([os.path.basename(f) for f in _all_java_files])
 
     if USE_AGENT_MODE:
-        log("Modo Agente ativado — Claude planeja, Ollama executa.", "PHASE")
+        log("Agent Mode activated — Claude plans, Ollama executes.", "PHASE")
         from agent.loop import run_agent_loop
         run_agent_loop(repo_path, reporter, exec_logger, cache, semantic_mem)
     else:
-        log("Modo Pipeline fixo (USE_AGENT_MODE=false).", "PHASE")
+        log("Fixed Pipeline Mode (USE_AGENT_MODE=false).", "PHASE")
         import glob as _glob
         import yaml as _yaml
         from java.community_runner import run_skill as _run_skill
         from java.llm_runner import run_skill as _run_llm_skill
-        from java.llm_reviewer import review_diff as _review_diff
-        from java.compiler import maven_test as _maven_test
+        from java.diff_reviewer import review_diff as _review_diff
+        from java.maven_build import maven_test as _maven_test
         from core.utils import run_cmd as _run_cmd
         from config import MODEL_REVIEWER as _MODEL_SOLID
 
@@ -272,7 +272,7 @@ def main():
         config_paths = sorted(_glob.glob(os.path.join(configs_dir, "*.yml")))
 
         if not config_paths:
-            log(f"Nenhum config .yml encontrado em {configs_dir}", "ERR")
+            log(f"No .yml configs found in {configs_dir}", "ERR")
             return
 
         for config_path in config_paths:
@@ -280,7 +280,7 @@ def main():
                 skill_config = _yaml.safe_load(_f)
             skill_id = skill_config.get("skill", os.path.basename(config_path))
             tool     = skill_config.get("tool", "")
-            log(f"Iniciando Skill: {skill_id} (tool={tool})", "PHASE")
+            log(f"Starting Skill: {skill_id} (tool={tool})", "PHASE")
             exec_logger.log_phase_start(skill_id, f"Tool: {tool}")
 
             if tool == "llm":
@@ -294,28 +294,28 @@ def main():
             else:
                 changed, diff = _run_skill(skill_config, repo_path)
             if not changed:
-                log(f"  [{skill_id}] sem alterações — pulando", "OK")
+                log(f"  [{skill_id}] no changes — skipping", "OK")
                 cache.mark_phase_done(skill_id, skill_id)
                 continue
 
             verdict = _review_diff(diff, skill_config.get("review_criteria", ""), _MODEL_SOLID)
-            log(f"  [{skill_id}] revisor: {verdict}")
+            log(f"  [{skill_id}] reviewer: {verdict}")
 
             if verdict == "REJECT":
                 _run_cmd("git restore .", cwd=repo_path)
                 cache.mark_phase_done(skill_id, skill_id)
-                log(f"  [{skill_id}] revertido (REJECT)", "WARN")
+                log(f"  [{skill_id}] reverted (REJECT)", "WARN")
                 continue
 
             build_ok, build_output = _maven_test(repo_path)
             if not build_ok:
-                log(f"  [{skill_id}] build quebrado após APPROVE — revertendo", "WARN")
+                log(f"  [{skill_id}] build broke after APPROVE — reverting", "WARN")
                 _run_cmd("git restore .", cwd=repo_path)
             else:
                 cache.mark_phase_done(skill_id, skill_id)
-                log(f"  [{skill_id}] aceito ✓", "OK")
-                # M1: emite FILE_ACCEPTED via diff só para fases community
-                # fases llm/flow já emitem por conta própria via exec_logger interno
+                log(f"  [{skill_id}] accepted ✓", "OK")
+                # M1: emit FILE_ACCEPTED via diff only for community phases
+                # llm/flow phases already emit on their own via internal exec_logger
                 if tool not in ("llm", "flow", "flow-dry"):
                     import re as _re
                     for _fname in sorted(set(_re.findall(
@@ -323,15 +323,15 @@ def main():
                     ))):
                         exec_logger.log_file_accepted(skill_id, _fname, "+community")
 
-        # S5: segunda passagem de testes para classes com field injection liberadas pelo solid-dip.
-        # Na primeira passagem (AUDIT_COVERAGE), M7 adia classes que têm @Autowired sem construtor
-        # mas também possuem `new ConcreteClass()` — esperando que solid-dip converta o construtor.
-        # Aqui relemos o arquivo de produção já modificado; M7 não vai mais adiar essas classes.
-        # Classes já cobertas (≥90%) são puladas por M8 sem custo adicional.
-        log("S5: Re-auditando cobertura para classes liberadas pelo solid-dip...", "PHASE")
+        # S5: second test pass for classes with field injection released by solid-dip.
+        # In the first pass (AUDIT_COVERAGE), M7 defers classes that have @Autowired without
+        # a constructor but also have `new ConcreteClass()` — waiting for solid-dip to convert.
+        # Here we re-read the already modified production file; M7 will no longer defer them.
+        # Classes already covered (≥90%) are skipped by M8 at no additional cost.
+        log("S5: Re-auditing coverage for classes released by solid-dip...", "PHASE")
         exec_logger.log_phase_start(
             "AUDIT_COVERAGE_POST_DIP",
-            "Geração de testes pós-solid-dip (classes com field injection convertidas)"
+            "Post-solid-dip test generation (field-injection classes converted)"
         )
         from core.utils import load_skill as _load_s5
         _rules_s5 = _load_s5("java-tdd-unit-test", section="LLM INSTRUCTIONS") or (
@@ -342,14 +342,14 @@ def main():
         )
         generate_tests(repo_path, "post_solid_dip_coverage", _rules_s5, reporter, exec_logger)
 
-    # --- Sanitização Final ---
-    log("Iniciando Sanitização Final...", "PHASE")
-    exec_logger.log_phase_start("SANITIZATION", "Limpando imports e código morto")
+    # --- Final Sanitization ---
+    log("Starting Final Sanitization...", "PHASE")
+    exec_logger.log_phase_start("SANITIZATION", "Cleaning imports and dead code")
     run_sanitization(repo_path)
 
     # --- Javadoc ---
-    # D: descarrega o modelo Ollama em uso antes de JAVADOC para liberar VRAM/RAM saturada
-    # após ~3h de geração de testes — evita timeouts em cascata na fase de Javadoc.
+    # D: unload the Ollama model before JAVADOC to free saturated VRAM/RAM
+    # after ~3h of test generation — prevents timeout cascades in the Javadoc phase.
     try:
         import urllib.request as _ur, json as _json
         from config import MODEL_CLEAN as _MODEL_CLEAN, OLLAMA_BASE_URL as _OLLAMA_URL
@@ -361,40 +361,40 @@ def main():
         )
         with _ur.urlopen(_unload_req, timeout=10):
             pass
-        log(f"[Javadoc] Modelo {_MODEL_CLEAN} descarregado — VRAM liberada antes de Javadoc", "INFO")
+        log(f"[Javadoc] Model {_MODEL_CLEAN} unloaded — VRAM freed before Javadoc", "INFO")
     except Exception as _unload_err:
-        log(f"[Javadoc] Aviso: falha ao descarregar modelo ({_unload_err}) — continuando", "WARN")
+        log(f"[Javadoc] Warning: failed to unload model ({_unload_err}) — continuing", "WARN")
 
-    log("Inserindo Javadoc nos métodos públicos...", "PHASE")
-    exec_logger.log_phase_start("JAVADOC", "Inserção de Javadoc em métodos públicos")
+    log("Inserting Javadoc on public methods...", "PHASE")
+    exec_logger.log_phase_start("JAVADOC", "Javadoc insertion on public methods")
     try:
         from java.javadoc_runner import run_javadoc
         run_javadoc(repo_path, exec_logger=exec_logger)
     except Exception as _javadoc_err:
-        log(f"[Javadoc] Erro na fase: {_javadoc_err} — continuando pipeline", "WARN")
+        log(f"[Javadoc] Phase error: {_javadoc_err} — continuing pipeline", "WARN")
 
-    # --- Validação Final ---
-    log("Iniciando Validação Final...", "PHASE")
-    exec_logger.log_phase_start("FINAL_VALIDATION", "Validação Final pós-refatoração")
+    # --- Final Validation ---
+    log("Starting Final Validation...", "PHASE")
+    exec_logger.log_phase_start("FINAL_VALIDATION", "Final Validation post-refactoring")
     final_ok, _ = maven_test(repo_path)
     if final_ok:
-        log("Validação Final: BUILD OK ✓", "OK")
+        log("Final Validation: BUILD OK ✓", "OK")
         _, _, _, _ = maven_test_with_coverage(repo_path, "")
         final_cov = get_global_coverage(repo_path)
-        exec_logger.log_coverage(final_cov, "Cobertura Final Atingida")
-        log(f"Cobertura Final: {final_cov:.2f}%", "OK" if final_cov >= 90.0 else "WARN")
-        # A2: alerta se cobertura caiu em relação ao pré-refatoração
+        exec_logger.log_coverage(final_cov, "Final Coverage Achieved")
+        log(f"Final Coverage: {final_cov:.2f}%", "OK" if final_cov >= 90.0 else "WARN")
+        # A2: alert if coverage dropped compared to pre-refactoring
         if final_cov < _coverage_before_refactor - 1.0:
             _drop = _coverage_before_refactor - final_cov
-            log(f"ATENÇÃO: Cobertura regrediu {_drop:.2f}pp ({_coverage_before_refactor:.2f}% → {final_cov:.2f}%). Verifique fases 13/14.", "WARN")
-            exec_logger.log_phase_start("COVERAGE_REGRESSION", f"Regressão de cobertura: -{_drop:.2f}pp")
+            log(f"WARNING: Coverage regressed {_drop:.2f}pp ({_coverage_before_refactor:.2f}% → {final_cov:.2f}%). Check phases 13/14.", "WARN")
+            exec_logger.log_phase_start("COVERAGE_REGRESSION", f"Coverage regression: -{_drop:.2f}pp")
     else:
-        log("Validação Final: BUILD QUEBRADO após refatoração!", "ERR")
-        exec_logger.log_phase_start("FINAL_VALIDATION_FAILED", "Build quebrado após refatoração")
+        log("Final Validation: BUILD BROKEN after refactoring!", "ERR")
+        exec_logger.log_phase_start("FINAL_VALIDATION_FAILED", "Build broken after refactoring")
 
-    # --- Relatório de Refatoração ---
-    log("Gerando relatório de refatoração...", "PHASE")
-    exec_logger.log_phase_start("REPORT", "Relatório por classe — o que foi aplicado e por que foi pulado")
+    # --- Refactoring Report ---
+    log("Generating refactoring report...", "PHASE")
+    exec_logger.log_phase_start("REPORT", "Per-class report — what was applied and why it was skipped")
     from java.report_runner import run_report as _run_report
     _run_report(
         repo_path=repo_path,
@@ -403,37 +403,37 @@ def main():
         exec_logger=exec_logger,
     )
 
-    # --- Persistência Final ---
-    log("Persistindo resultado final...", "PHASE")
-    exec_logger.log_phase_start("COMMIT_PUSH", "Persistência Final — commit + push")
+    # --- Final Persistence ---
+    log("Persisting final result...", "PHASE")
+    exec_logger.log_phase_start("COMMIT_PUSH", "Final Persistence — commit + push")
     try:
         commit_and_push(repo_path, branch_name, "final-refactoring")
         exec_logger.log_git_commit("COMMIT_PUSH", branch_name)
-        log(f"Commit realizado em {branch_name} ✓", "OK")
+        log(f"Commit done on {branch_name} ✓", "OK")
     except Exception as _e:
-        log(f"Erro no commit/push: {_e}", "ERR")
-        exec_logger.log_phase_start("COMMIT_PUSH_FAILED", f"Erro: {_e}")
+        log(f"Error on commit/push: {_e}", "ERR")
+        exec_logger.log_phase_start("COMMIT_PUSH_FAILED", f"Error: {_e}")
 
-    # --- Finalização ---
+    # --- Finalization ---
     from core.live_state import update as _live_final
     _live_final(active_skill="", current_model="", current_file="")
-    exec_logger.log_phase_start("PIPELINE_COMPLETE", "Pipeline finalizado")
-    log("Refatoração Concluída!", "OK")
+    exec_logger.log_phase_start("PIPELINE_COMPLETE", "Pipeline completed")
+    log("Refactoring Complete!", "OK")
     failed_tracker = get_failed_tracker()
     if len(failed_tracker) > 0:
-        log(f"Aviso: {len(failed_tracker)} arquivos falharam. Use o reprocessador.", "WARN")
+        log(f"Warning: {len(failed_tracker)} files failed. Use the reprocessor.", "WARN")
 
-    # Garante que o dashboard capture is_complete=True ANTES do processo sair.
-    # O background updater roda a cada 10s e morre junto com o main thread —
-    # sem esse write síncrono o último JSON pode não refletir PIPELINE_COMPLETE.
+    # Ensure the dashboard captures is_complete=True BEFORE the process exits.
+    # The background updater runs every 10s and dies with the main thread —
+    # without this synchronous write the last JSON may not reflect PIPELINE_COMPLETE.
     try:
         subprocess.run(
             ["python3", os.path.join("dashboard", "data.py")],
             capture_output=True, timeout=15,
         )
-        log("Dashboard final atualizado (is_complete=True persistido)", "OK")
+        log("Final dashboard updated (is_complete=True persisted)", "OK")
     except Exception as _e:
-        log(f"Falha ao atualizar dashboard final: {_e}", "WARN")
+        log(f"Failed to update final dashboard: {_e}", "WARN")
 
 if __name__ == "__main__":
     main()

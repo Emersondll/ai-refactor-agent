@@ -1,10 +1,10 @@
 """
 prompt.py — ai/prompt.py
 
-SOUL: personalidade e princípios carregados de soul.md (raiz do projeto).
-BASE_CONSTRAINTS: regras técnicas e formato de output obrigatório.
+SOUL: agent identity and principles loaded from soul.md at the project root.
+BASE_CONSTRAINTS: technical rules and mandatory output format.
 
-build_prompt(): compõe SOUL + BASE_CONSTRAINTS + phase delta + dep_context.
+build_prompt(): composes SOUL + BASE_CONSTRAINTS + phase delta + dep_context.
 """
 
 import os
@@ -44,9 +44,9 @@ NO explanations, NO markdown outside the code block.
 NO ANSI or invisible characters.\
 """
 
-# P1: constraints específicos para geração de testes — não contamina com regras de refatoração.
-# "PRESERVE all existing import statements" e "DO NOT modify existing test code" são semânticamente
-# opostos ao objetivo de geração de testes (criar um arquivo novo do zero).
+# P1: test-specific constraints — do not mix with refactoring rules.
+# "PRESERVE all existing import statements" and "DO NOT modify existing test code" are semantically
+# opposite to the goal of test generation (creating a brand new file from scratch).
 BASE_CONSTRAINTS_TEST = """\
 ### TEST GENERATION CONSTRAINTS (MANDATORY)
 You are writing a NEW Java test class from scratch — not editing an existing file.
@@ -107,8 +107,8 @@ TECHNICAL GUIDELINES:
 
 def _build_task(mode: str, file_name: str, dep_context: str = "") -> str:
     if mode == "test":
-        # P2: regras de geração de testes carregadas da skill — não hardcoded.
-        # Permite ajustar comportamento do LLM editando o SKILL.md sem tocar no Python.
+        # P2: test generation rules loaded from skill — not hardcoded.
+        # Allows adjusting LLM behavior by editing SKILL.md without touching Python.
         from core.utils import load_skill as _ls
         _test_rules = _ls("java-tdd-unit-test", section="Test Generation Rules") or _FALLBACK_TEST_RULES
 
@@ -146,8 +146,8 @@ def build_prompt(code: str, phase_delta: str, mode: str, file_name: str,
     parts = []
     if _SOUL:
         parts.append(_SOUL)
-    # P1: BASE_CONSTRAINTS é para refatoração (PRESERVE imports, DO NOT modify tests).
-    # Para geração de testes usamos BASE_CONSTRAINTS_TEST — semânticamente correto para criação.
+    # P1: BASE_CONSTRAINTS is for refactoring (PRESERVE imports, DO NOT modify tests).
+    # For test generation we use BASE_CONSTRAINTS_TEST — semantically correct for creation.
     constraints = BASE_CONSTRAINTS_TEST if mode == "test" else BASE_CONSTRAINTS
     parts += [
         constraints,

@@ -1,17 +1,17 @@
 """
-java/flow_runner.py — Runner de refatoração orientada a fluxo de endpoint.
+java/flow_runner.py — Endpoint-flow-oriented refactoring runner.
 
-Duas passadas:
-  1. Arquivos EXCLUSIVOS  → refatora com contexto do único fluxo que os usa
-  2. Arquivos COMPARTILHADOS → refatora com contexto de TODOS os fluxos que os usam
+Two passes:
+  1. EXCLUSIVE files  → refactored with context of the single flow that uses them
+  2. SHARED files     → refactored with context of ALL flows that use them
 
-Validação comportamental:
-  - mvn compile -q por arquivo (sintaxe)
-  - mvn test por fluxo (comportamento) → repair loop no código de produção se falhar
+Behavioral validation:
+  - mvn compile -q per file (syntax)
+  - mvn test per flow (behavior) → repair loop on production code if it fails
 
 DRY check (tool: flow-dry):
-  - Detecta grupos de métodos repetidos em 2+ arquivos
-  - LLM extrai para classe utilitária, validado com mvn test
+  - Detects groups of repeated methods in 2+ files
+  - LLM extracts them into a utility class, validated with mvn test
 """
 
 import os
@@ -21,7 +21,7 @@ from core.logger import log
 from core.live_state import update as _live
 from core.utils import read_file, write_file, run_cmd, load_skill
 from ai.model import call_ai, call_ai_with_correction
-from java.compiler import ENV_WRAPPER, maven_test
+from java.maven_build import ENV_WRAPPER, maven_test
 from config import MAX_RETRIES
 
 _MAX_REPAIR = MAX_RETRIES
@@ -30,35 +30,35 @@ _MAX_REPAIR = MAX_RETRIES
 def run_skill(skill_config: dict, repo_path: str, cache=None, exec_logger=None) -> tuple[bool, str]:
     """
     Flow-aware refactoring.
-    tool: flow → chamado por main.py.
+    tool: flow → called by main.py.
     """
-    from java.flow_mapper import build_flow_map
+    from java.endpoint_mapper import build_flow_map
 
     skill_id = skill_config.get("skill", "flow-refactor")
     rules    = _load_rules(skill_config)
 
     if not rules:
-        log(f"[FlowRunner] Nenhuma regra para '{skill_id}'", "ERR")
+        log(f"[FlowRunner] No rules found for '{skill_id}'", "ERR")
         return False, ""
 
-    log("[FlowRunner] Mapeando fluxos de endpoint...")
+    log("[FlowRunner] Mapping endpoint flows...")
     flow_map     = build_flow_map(repo_path)
     flows        = flow_map["flows"]
     file_sharing = flow_map["file_sharing"]
     shared_files = set(file_sharing.keys())
 
     if not flows:
-        log("[FlowRunner] Nenhum endpoint encontrado no projeto", "WARN")
+        log("[FlowRunner] No endpoints found in the project", "WARN")
         return False, ""
 
-    log(f"[FlowRunner] {len(flows)} fluxos | {len(shared_files)} arquivos compartilhados")
+    log(f"[FlowRunner] {len(flows)} flows | {len(shared_files)} shared files")
 
     any_changed = False
 
     # ------------------------------------------------------------------
-    # Passada 1 — Arquivos exclusivos (pertencem a apenas 1 fluxo)
+    # Pass 1 — Exclusive files (belong to only 1 flow)
     # ------------------------------------------------------------------
-    log("[FlowRunner] Passada 1: arquivos exclusivos...")
+    log("[FlowRunner] Pass 1: exclusive files...")
     processed_exclusive: set[str] = set()
 
     for flow in flows:
@@ -76,16 +76,16 @@ def run_skill(skill_config: dict, repo_path: str, cache=None, exec_logger=None) 
                 any_changed  = True
             processed_exclusive.add(file_path)
 
-        # Valida comportamento ao final de cada fluxo
+        # Validate behavior at the end of each flow
         if flow_changed:
             _validate_and_repair(
                 flow["files"], rules, skill_id, flow_context, repo_path, cache
             )
 
     # ------------------------------------------------------------------
-    # Passada 2 — Arquivos compartilhados (pertencem a 2+ fluxos)
+    # Pass 2 — Shared files (belong to 2+ flows)
     # ------------------------------------------------------------------
-    log("[FlowRunner] Passada 2: arquivos compartilhados...")
+    log("[FlowRunner] Pass 2: shared files...")
 
     for file_path, endpoints in file_sharing.items():
         if cache and cache.is_phase_done(file_path, skill_id):
@@ -95,11 +95,11 @@ def run_skill(skill_config: dict, repo_path: str, cache=None, exec_logger=None) 
         multi_context    = _build_multi_flow_context(file_path, containing_flows, repo_path)
         label            = os.path.basename(file_path)
 
-        log(f"  [FlowRunner] {label} — compartilhado em {len(endpoints)} fluxos")
+        log(f"  [FlowRunner] {label} — shared across {len(endpoints)} flows")
 
         if _refactor_file(file_path, rules, skill_id, multi_context, repo_path, cache, exec_logger):
             any_changed = True
-            # Shared files: valida com teste completo imediatamente (maior risco)
+            # Shared files: validate with full test immediately (higher risk)
             _validate_and_repair(
                 [file_path], rules, skill_id, multi_context, repo_path, cache
             )
@@ -110,8 +110,8 @@ def run_skill(skill_config: dict, repo_path: str, cache=None, exec_logger=None) 
 
 def dry_check(skill_config: dict, repo_path: str, exec_logger=None) -> tuple[bool, str]:
     """
-    Detecta código repetido em 2+ arquivos e extrai para utilitário.
-    tool: flow-dry → chamado por main.py.
+    Detects repeated code across 2+ files and extracts it to a utility class.
+    tool: flow-dry → called by main.py.
     """
     from java.refactor import get_java_files
     from java.llm_runner import _is_structural_type
@@ -120,43 +120,43 @@ def dry_check(skill_config: dict, repo_path: str, exec_logger=None) -> tuple[boo
     rules    = _load_rules(skill_config)
 
     if not rules:
-        log(f"[DryCheck] Nenhuma regra para '{skill_id}'", "ERR")
+        log(f"[DryCheck] No rules found for '{skill_id}'", "ERR")
         return False, ""
 
     java_files = get_java_files(repo_path, tests=False)
 
-    # C2: filtra tipos estruturais antes de detectar candidatos DRY
+    # C2: filter structural types before detecting DRY candidates
     filtered: list[str] = []
     for f in java_files:
         code = read_file(f) or ""
         if _is_structural_type(code, f):
-            log(f"  [DryCheck] {os.path.basename(f)} — tipo estrutural, ignorando")
+            log(f"  [DryCheck] {os.path.basename(f)} — structural type, skipping")
         else:
             filtered.append(f)
     skipped_structural = len(java_files) - len(filtered)
     if skipped_structural:
-        log(f"[DryCheck] {skipped_structural} arquivos estruturais filtrados antes da detecção")
+        log(f"[DryCheck] {skipped_structural} structural files filtered before detection")
 
     candidates = _find_dry_candidates(filtered)
 
     if not candidates:
-        log("[DryCheck] Nenhum padrão DRY detectado", "OK")
+        log("[DryCheck] No DRY pattern detected", "OK")
         return False, ""
 
-    log(f"[DryCheck] {len(candidates)} grupos candidatos")
+    log(f"[DryCheck] {len(candidates)} candidate groups")
     any_changed = False
-    seen_files: set[str] = set()  # C3: deduplicação entre grupos
+    seen_files: set[str] = set()  # C3: deduplication across groups
 
     for group in candidates:
-        # C3: remove arquivos já incluídos em grupos processados anteriormente
+        # C3: remove files already included in previously processed groups
         group_files = [f for f in group["files"] if f not in seen_files]
         if len(group_files) < 2:
-            log(f"  [DryCheck] grupo '{group['method']}' — < 2 arquivos após deduplicação, pulando")
+            log(f"  [DryCheck] group '{group['method']}' — < 2 files after deduplication, skipping")
             continue
         seen_files |= set(group_files)
 
         names = [os.path.basename(f) for f in group_files]
-        log(f"  [DryCheck] analisando: {names} (método: {group['method']})")
+        log(f"  [DryCheck] analyzing: {names} (method: {group['method']})")
         _live(active_skill=skill_id, current_model="")
         group_label = f"DRYGroup({','.join(names)})"
         if exec_logger:
@@ -191,13 +191,13 @@ def dry_check(skill_config: dict, repo_path: str, exec_logger=None) -> tuple[boo
 
         ok, _ = maven_test(repo_path)
         if ok:
-            log(f"  [DryCheck] extração aceita ✓", "OK")
+            log(f"  [DryCheck] extraction accepted ✓", "OK")
             any_changed = True
             if exec_logger:
                 for n in names:
                     exec_logger.log_file_accepted(skill_id, n, "+dry")
         else:
-            log(f"  [DryCheck] mvn test falhou após extração — revertendo", "WARN")
+            log(f"  [DryCheck] mvn test failed after extraction — reverting", "WARN")
             run_cmd("git restore .", cwd=repo_path)
             if exec_logger:
                 for n in names:
@@ -214,7 +214,7 @@ def dry_check(skill_config: dict, repo_path: str, exec_logger=None) -> tuple[boo
 def _refactor_file(file_path: str, rules: str, skill_id: str,
                    flow_context: str, repo_path: str, cache,
                    exec_logger=None) -> bool:
-    """Refatora um arquivo com contexto de fluxo. Retorna True se aceito."""
+    """Refactors a file with flow context. Returns True if accepted."""
     file_name = os.path.basename(file_path)
 
     if cache and cache.is_phase_done(file_path, skill_id):
@@ -228,14 +228,14 @@ def _refactor_file(file_path: str, rules: str, skill_id: str,
     if _is_structural_type(code, file_path):
         if cache:
             cache.mark_phase_done(file_path, skill_id)
-        # M3: emite skip para o dashboard
+        # M3: emit skip event to dashboard
         if exec_logger:
             exec_logger.log_file_skipped(skill_id, file_name, "no_business_logic")
         return False
 
-    log(f"  [FlowRunner] processando {file_name}...")
+    log(f"  [FlowRunner] processing {file_name}...")
     _live(active_skill=skill_id, current_model="")
-    # M3: emite FILE_START para o dashboard mostrar progresso
+    # M3: emit FILE_START so the dashboard can show progress
     if exec_logger:
         exec_logger.log_file_processing(skill_id, file_name, "java", "refactor")
 
@@ -251,7 +251,7 @@ def _refactor_file(file_path: str, rules: str, skill_id: str,
     _live(active_skill="")
 
     if not new_code or new_code.strip() == code.strip():
-        log(f"  [FlowRunner] {file_name} — sem alteração")
+        log(f"  [FlowRunner] {file_name} — no change")
         if cache:
             cache.mark_phase_done(file_path, skill_id)
         if exec_logger:
@@ -261,7 +261,7 @@ def _refactor_file(file_path: str, rules: str, skill_id: str,
     write_file(file_path, new_code)
 
     if not _mvn_compile(repo_path):
-        log(f"  [FlowRunner] {file_name} — compile falhou, revertendo", "WARN")
+        log(f"  [FlowRunner] {file_name} — compile failed, reverting", "WARN")
         run_cmd(f'git checkout -- "{file_path}"', cwd=repo_path)
         if exec_logger:
             exec_logger.log_file_reverted(skill_id, file_name, "compile_failed")
@@ -282,15 +282,15 @@ def _refactor_file(file_path: str, rules: str, skill_id: str,
 def _validate_and_repair(files: list[str], rules: str, skill_id: str,
                           flow_context: str, repo_path: str, cache) -> None:
     """
-    Executa mvn test. Se falhar, tenta reparar os arquivos que mudaram.
-    Se o reparo falhar, reverte o arquivo individual.
+    Runs mvn test. If it fails, attempts to repair the files that changed.
+    If repair fails, reverts the individual file.
     """
     ok, output = maven_test(repo_path)
     if ok:
         log("  [FlowRunner] mvn test — OK ✓", "OK")
         return
 
-    log("  [FlowRunner] mvn test falhou — iniciando repair de produção", "WARN")
+    log("  [FlowRunner] mvn test failed — starting production repair", "WARN")
 
     from java.refactor import _categorize_build_error
     error_reason = _categorize_build_error(output)
@@ -303,7 +303,7 @@ def _validate_and_repair(files: list[str], rules: str, skill_id: str,
         original_code = _git_original(file_path, repo_path)
 
         if not original_code or current_code.strip() == original_code.strip():
-            continue  # não mudou, não é culpado
+            continue  # not changed — not the culprit
 
         file_name = os.path.basename(file_path)
         repaired  = False
@@ -339,7 +339,7 @@ def _validate_and_repair(files: list[str], rules: str, skill_id: str,
             error_reason = _categorize_build_error(output2)
 
         if not repaired:
-            log(f"  [FlowRunner] {file_name} — repair falhou, revertendo", "WARN")
+            log(f"  [FlowRunner] {file_name} — repair failed, reverting", "WARN")
             run_cmd(f'git checkout -- "{file_path}"', cwd=repo_path)
             if cache:
                 cache._phase_done.get(file_path, set()).discard(skill_id)
@@ -351,8 +351,8 @@ def _validate_and_repair(files: list[str], rules: str, skill_id: str,
 
 def _build_flow_context(flow: dict, file_sharing: dict,
                          repo_path: str) -> str:
-    """Contexto para arquivo exclusivo de um único fluxo."""
-    from java.context import _extract_simplified_header
+    """Context for a file that belongs exclusively to a single flow."""
+    from java.dep_context import _extract_simplified_header
 
     lines = [
         "=== ENDPOINT FLOW CONTEXT ===",
@@ -379,8 +379,8 @@ def _build_flow_context(flow: dict, file_sharing: dict,
 
 def _build_multi_flow_context(file_path: str, flows: list[dict],
                                repo_path: str) -> str:
-    """Contexto para arquivo compartilhado — lista TODOS os fluxos que o usam."""
-    from java.context import _extract_simplified_header
+    """Context for a shared file — lists ALL flows that use it."""
+    from java.dep_context import _extract_simplified_header
 
     lines = [
         "=== SHARED FILE — MULTI-FLOW CONTEXT ===",
@@ -419,8 +419,8 @@ def _build_multi_flow_context(file_path: str, flows: list[dict],
 
 def _find_dry_candidates(java_files: list[str]) -> list[dict]:
     """
-    Identifica métodos com o mesmo nome em 2+ arquivos — candidatos a DRY.
-    Filtra nomes triviais e limita a 5 grupos para evitar LLM excessivo.
+    Identifies methods with the same name across 2+ files — DRY candidates.
+    Filters out trivial names and caps at 5 groups to avoid excessive LLM calls.
     """
     _TRIVIAL = {
         "get", "set", "toString", "equals", "hashCode", "main",
@@ -461,8 +461,8 @@ def _find_dry_candidates(java_files: list[str]) -> list[dict]:
 def _apply_dry_result(result: str, original_files: list[str],
                        repo_path: str) -> bool:
     """
-    Parseia a resposta multi-arquivo do LLM e aplica as mudanças.
-    Formato esperado: // FILE: FileName.java\n```java\n...\n```
+    Parses the LLM multi-file response and applies the changes.
+    Expected format: // FILE: FileName.java\n```java\n...\n```
     """
     pattern = re.compile(
         r'//\s*FILE:\s*(\S+\.java)\s*\n```java\s*\n(.*?)```',
@@ -519,7 +519,7 @@ def _load_rules(skill_config: dict) -> str:
 
 def _get_dep_context(code: str, repo_path: str, cache) -> str:
     try:
-        from java.context import get_dependency_context
+        from java.dep_context import get_dependency_context
         return get_dependency_context(code, repo_path, cache)
     except Exception:
         return ""

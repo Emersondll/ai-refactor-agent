@@ -1,17 +1,17 @@
 """
-java/llm_runner.py — Runner LLM por arquivo para fases de refatoração semântica.
+java/llm_runner.py — LLM runner per file for semantic refactoring phases.
 
-Contrato idêntico ao community_runner: recebe skill_config + repo_path,
-retorna (changed: bool, diff: str).
+Identical contract to community_runner: receives skill_config + repo_path,
+returns (changed: bool, diff: str).
 
-Fluxo por arquivo:
+Per-file flow:
   1. cache hit → skip
-  2. pré-filtro (detect_pattern) → skip se não é candidato
+  2. pre-filter (detect_pattern) → skip if not a candidate
   3. get_dependency_context
-  4. call_ai com rules da skill
-  5. sem mudança → skip
-  6. write_file → mvn compile -q → revert se falhar
-  7. marca cache se aceito
+  4. call_ai with skill rules
+  5. no change → skip
+  6. write_file → mvn compile -q → revert if failed
+  7. mark cache if accepted
 """
 
 import os
@@ -22,11 +22,12 @@ from core.live_state import update as _live
 from core.utils import read_file, write_file, run_cmd, load_skill
 from ai.model import call_ai
 from java.refactor import get_java_files
-from java.compiler import ENV_WRAPPER
+from java.maven_build import ENV_WRAPPER
+from java.community_runner import format_single_file
 
 
 def run_skill(skill_config: dict, repo_path: str, cache=None, exec_logger=None) -> tuple[bool, str]:
-    # Despacha para o runner método a método quando configurado
+    # Dispatch to the method-by-method runner when configured
     if skill_config.get("method_level") or skill_config.get("class_level"):
         from java.method_runner import run_method_skill
         return run_method_skill(skill_config, repo_path, cache=cache, exec_logger=exec_logger)
@@ -36,14 +37,14 @@ def run_skill(skill_config: dict, repo_path: str, cache=None, exec_logger=None) 
     rules      = _load_rules(skill_config)
 
     if not rules:
-        log(f"[LLMRunner] Nenhuma regra encontrada para '{skill_id}'", "ERR")
+        log(f"[LLMRunner] No rules found for '{skill_id}'", "ERR")
         return False, ""
 
     java_files   = get_java_files(repo_path, tests=False)
     any_changed  = False
 
     _live(active_skill=skill_id, current_file="")
-    log(f"[LLMRunner] {skill_id}: {len(java_files)} arquivos candidatos")
+    log(f"[LLMRunner] {skill_id}: {len(java_files)} candidate files")
 
     for file_path in java_files:
         file_name = os.path.basename(file_path)
@@ -74,7 +75,7 @@ def run_skill(skill_config: dict, repo_path: str, cache=None, exec_logger=None) 
                 exec_logger.log_file_skipped(skill_id, file_name, "pattern_not_found")
             continue
 
-        log(f"  [{skill_id}] processando {file_name}...")
+        log(f"  [{skill_id}] processing {file_name}...")
         _live(active_skill=skill_id, current_model="", current_file=file_name)
         if exec_logger:
             exec_logger.log_file_processing(skill_id, file_name, "java", "refactor")
@@ -91,7 +92,7 @@ def run_skill(skill_config: dict, repo_path: str, cache=None, exec_logger=None) 
         )
 
         if not new_code or new_code.strip() == code.strip():
-            log(f"  [{skill_id}] {file_name} — sem alteração")
+            log(f"  [{skill_id}] {file_name} — no change")
             if cache:
                 cache.mark_phase_done(file_path, skill_id)
             if exec_logger:
@@ -101,14 +102,15 @@ def run_skill(skill_config: dict, repo_path: str, cache=None, exec_logger=None) 
         write_file(file_path, new_code)
 
         if _mvn_compile(repo_path):
-            log(f"  [{skill_id}] {file_name} — aceito ✓", "OK")
+            format_single_file(file_path, repo_path)
+            log(f"  [{skill_id}] {file_name} — accepted ✓", "OK")
             any_changed = True
             if cache:
                 cache.mark_phase_done(file_path, skill_id)
             if exec_logger:
                 exec_logger.log_file_accepted(skill_id, file_name, "+refactor")
         else:
-            log(f"  [{skill_id}] {file_name} — compile falhou, revertendo", "WARN")
+            log(f"  [{skill_id}] {file_name} — compile failed, reverting", "WARN")
             run_cmd(f'git checkout -- "{file_path}"', cwd=repo_path)
             if exec_logger:
                 exec_logger.log_file_reverted(skill_id, file_name, "compile_failed")
@@ -124,7 +126,7 @@ def run_skill(skill_config: dict, repo_path: str, cache=None, exec_logger=None) 
 # ---------------------------------------------------------------------------
 
 def _load_rules(skill_config: dict) -> str:
-    """Carrega regras do yml (inline) ou do SKILL.md referenciado."""
+    """Loads rules from the yml (inline) or from the referenced SKILL.md."""
     rules = skill_config.get("rules", "")
     if rules:
         return rules
@@ -141,7 +143,7 @@ def _load_rules(skill_config: dict) -> str:
 
 
 def _needs_refactoring(code: str, skill_config: dict) -> bool:
-    """Pré-filtro: retorna False se o arquivo não tem o padrão alvo — evita chamada LLM desnecessária."""
+    """Pre-filter: returns False if the file does not contain the target pattern — avoids unnecessary LLM calls."""
     pattern_key = skill_config.get("detect_pattern", "")
     if not pattern_key:
         return True
@@ -157,7 +159,7 @@ def _needs_refactoring(code: str, skill_config: dict) -> bool:
 
 
 def _has_nested_if(code: str) -> bool:
-    """True se algum método tem if aninhado com profundidade >= 3."""
+    """True if any method has nested if blocks with depth >= 3."""
     max_if_depth  = 0
     current_depth = 0
     brace_depth   = 0
@@ -175,7 +177,7 @@ def _has_nested_if(code: str) -> bool:
 
 
 def _has_long_method(code: str) -> bool:
-    """True se algum método tem mais de 30 linhas de corpo."""
+    """True if any method has more than 30 lines of body."""
     in_method   = False
     brace_depth = 0
     method_lines = 0
@@ -204,7 +206,7 @@ def _has_long_method(code: str) -> bool:
 
 
 def _has_concrete_new(code: str) -> bool:
-    """True se há instanciação direta de serviço/repositório/manager."""
+    """True if there is direct instantiation of a service/repository/manager."""
     return bool(re.search(
         r'\bnew\s+[A-Z]\w*(Service|Repository|Manager|Handler|Processor|Impl)\s*\(',
         code,
@@ -212,7 +214,7 @@ def _has_concrete_new(code: str) -> bool:
 
 
 def _has_controller_logic(code: str) -> bool:
-    """True se é @RestController com padrões de lógica de negócio."""
+    """True if it is a @RestController with business logic patterns."""
     if '@RestController' not in code:
         return False
     return bool(re.search(r'(if\s*\(|for\s*\(|while\s*\(|\bswitch\s*\()', code))
@@ -220,16 +222,16 @@ def _has_controller_logic(code: str) -> bool:
 
 def _is_structural_type(code: str, file_path: str = "") -> bool:
     """
-    True para tipos sem lógica de negócio que não precisam de refatoração LLM:
-    records, interfaces, entidades de persistência (@Document/@Entity) e DTOs.
+    True for types without business logic that do not need LLM refactoring:
+    records, interfaces, persistence entities (@Document/@Entity), and DTOs.
     """
-    # record ou interface — nenhum corpo de lógica
+    # record or interface — no logic body
     if re.search(r'(?:public\s+)?(?:record|interface)\s+\w+', code):
         return True
-    # entidade de persistência (MongoDB Document, JPA Entity/Table)
+    # persistence entity (MongoDB Document, JPA Entity/Table)
     if re.search(r'@(Document|Entity|Table)\b', code):
         return True
-    # DTO por convenção de pacote ou sufixo de nome de arquivo
+    # DTO by package convention or file name suffix
     fname = os.path.basename(file_path)
     if re.search(r'(?i)(Dto|DTO|Request|Response)\.java$', fname):
         return True
@@ -238,13 +240,13 @@ def _is_structural_type(code: str, file_path: str = "") -> bool:
     return False
 
 
-# mantém nome antigo como alias para não quebrar chamadas existentes
+# keep old name as alias to avoid breaking existing call sites
 _is_record = _is_structural_type
 
 
 def _get_dep_context(code: str, repo_path: str, cache) -> str:
     try:
-        from java.context import get_dependency_context
+        from java.dep_context import get_dependency_context
         return get_dependency_context(code, repo_path, cache)
     except Exception:
         return ""

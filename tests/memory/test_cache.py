@@ -60,7 +60,7 @@ def test_phase_done_other_file_still_false(tmp_path):
     assert c.is_phase_done("/some/FileB.java", "01_javadoc") is False
 
 def test_phase_tracking_is_per_run(tmp_path):
-    # Nova instância = memória zerada
+    # New instance = blank in-memory state
     Cache(str(tmp_path)).mark_phase_done("/some/File.java", "01_javadoc")
     assert Cache(str(tmp_path)).is_phase_done("/some/File.java", "01_javadoc") is False
 

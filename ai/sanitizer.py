@@ -3,7 +3,7 @@ from core.utils import force_safe_encoding
 
 
 # ---------------------------------------------------------------------------
-# Limpeza de caracteres inválidos
+# Invalid character cleanup
 # ---------------------------------------------------------------------------
 
 def sanitize_java_code(code: str) -> str:
@@ -18,8 +18,8 @@ def sanitize_java_code(code: str) -> str:
 # ---------------------------------------------------------------------------
 
 def unescape_html_entities(code: str) -> str:
-    """
-    Modelos às vezes codificam < e > como entidades HTML dentro de generics.
+    """Models sometimes encode < and > as HTML entities inside generics.
+
     Ex: JpaRepository&lt;Balance, Long&gt;  →  JpaRepository<Balance, Long>
     """
     code = code.replace('&lt;',  '<')
@@ -31,29 +31,28 @@ def unescape_html_entities(code: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Reconstitui linhas package/import truncadas
+# Reconstruct truncated package/import lines
 # ---------------------------------------------------------------------------
 
 def fix_package_import_lines(code: str) -> str:
-    """
-    Corrige quebras de linha indevidas em declarações package/import.
+    """Fixes unintended line breaks in package/import declarations.
 
-    Padrões detectados:
-      1. import sem ; no final seguido de continuação com .
+    Detected patterns:
+      1. import without ; at end followed by continuation with .
          import com.example.service    →  import com.example.service.impl;
          .impl;
 
-      2. import sem ; seguido de ; sozinho
+      2. import without ; followed by standalone ;
          import com.example.Foo        →  import com.example.Foo;
          ;
 
-      3. NOVO — import truncado seguido de linha de pacote "órfã" (sem import):
-         import ...MerchantCategoryCodesDocumen;     ← truncado pelo modelo
-         com...MerchantCategoryCodesDocument;        ← continuação sem "import"
+      3. Truncated import followed by an "orphan" package line (no import keyword):
+         import ...MerchantCategoryCodesDocumen;     ← truncated by the model
+         com...MerchantCategoryCodesDocument;        ← continuation without "import"
 
-         Solução: substitui o import truncado pelo completo da linha órfã.
+         Fix: replace the truncated import with the complete orphan line.
     """
-    # Detecta linha que parece um pacote Java mas não tem "import" na frente
+    # Detect lines that look like a Java package but have no "import" prefix
     _ORPHAN_PKG = re.compile(r'^[a-z][a-zA-Z0-9_]*(\.[a-zA-Z0-9_]+)+;?$')
 
     lines  = code.splitlines()
@@ -70,7 +69,7 @@ def fix_package_import_lines(code: str) -> str:
         )
 
         if is_pkg_or_import and not stripped.endswith(";"):
-            # Caso 1 e 2: une com próximas linhas
+            # Cases 1 and 2: merge with following lines
             combined = stripped
             while i + 1 < len(lines):
                 nxt = lines[i + 1].strip()
@@ -91,17 +90,17 @@ def fix_package_import_lines(code: str) -> str:
             result.append(combined)
 
         elif not is_pkg_or_import and _ORPHAN_PKG.match(stripped) and stripped:
-            # Caso 3: linha de pacote órfã após um import
+            # Case 3: orphan package line after an import
             if result and result[-1].startswith("import "):
-                # Substitui o import anterior (possivelmente truncado) por este
-                # que é o mais completo
+                # Replace the previous import (possibly truncated) with this
+                # one, which is the more complete form
                 fixed = "import " + stripped
                 if not fixed.endswith(";"):
                     fixed += ";"
                 result[-1] = fixed
-                # Não adiciona a linha órfã — ela substitui a anterior
+                # Do not append the orphan line — it replaces the previous one
             else:
-                # Linha solta sem contexto de import — adiciona import na frente
+                # Loose line without an import context — prefix with import
                 fixed = "import " + stripped
                 if not fixed.endswith(";"):
                     fixed += ";"
@@ -119,19 +118,38 @@ def fix_package_import_lines(code: str) -> str:
 # Reconstitui generics quebrados entre linhas
 # ---------------------------------------------------------------------------
 
-def fix_broken_generics(code: str) -> str:
-    """
-    Reconstitui declarações de tipo genérico quebradas pelo modelo.
+def _count_open_generics(line: str) -> int:
+    """Count unclosed generic brackets on a line, ignoring comparison operators.
 
-    O modelo frequentemente quebra a linha dentro de um bloco <...>:
+    A '<' is treated as a generic opener only when preceded by a word character
+    or ')' AND followed (after optional whitespace) by an uppercase letter or '?'.
+    This excludes comparisons like '< 0', '< someVar', and shift operators.
+    """
+    depth = 0
+    for i, c in enumerate(line):
+        if c == '<':
+            prev = line[i - 1] if i > 0 else ''
+            if prev.isalnum() or prev in ('_', ')'):
+                ahead = line[i + 1:].lstrip()
+                if ahead and (ahead[0].isupper() or ahead[0] == '?'):
+                    depth += 1
+        elif c == '>':
+            depth = max(0, depth - 1)
+    return depth
+
+
+def fix_broken_generics(code: str) -> str:
+    """Reconstructs generic type declarations broken across lines by the model.
+
+    The model often breaks lines inside a <...> block:
       public interface Foo extends JpaRepository<Balance,
                                                  Long> {
 
-    ou sem o espaço:
-      JpaRepository<Balance,\nLong>
+    or without the space:
+      JpaRepository<Balance,\\nLong>
 
-    Este passo une as linhas sempre que uma linha termina com vírgula
-    dentro de um contexto de generics (< aberto sem > fechado).
+    This step joins lines whenever a line ends with a comma inside an open
+    generics context (< opened without a matching >).
     """
     lines  = code.splitlines()
     result = []
@@ -140,14 +158,14 @@ def fix_broken_generics(code: str) -> str:
     while i < len(lines):
         line = lines[i]
 
-        # Conta < e > na linha atual — se não fechou, une com a próxima
-        open_generics = line.count('<') - line.count('>')
+        open_generics = _count_open_generics(line)
 
         while open_generics > 0 and i + 1 < len(lines):
             i   += 1
             nxt  = lines[i].strip()
             line = line.rstrip() + ' ' + nxt
-            open_generics += nxt.count('<') - nxt.count('>')
+            # Recount the fully merged line so nested generics are handled correctly
+            open_generics = _count_open_generics(line)
 
         result.append(line)
         i += 1
@@ -156,7 +174,7 @@ def fix_broken_generics(code: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Correções menores de tokens colados
+# Minor fixes for glued tokens
 # ---------------------------------------------------------------------------
 
 def fix_common_syntax_issues(code: str) -> str:
@@ -165,7 +183,7 @@ def fix_common_syntax_issues(code: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Extração principal
+# Main extraction
 # ---------------------------------------------------------------------------
 
 def clean_output(text: str) -> str | None:
@@ -195,7 +213,7 @@ def clean_output(text: str) -> str | None:
 
 
 def _is_brace_balanced(code: str) -> bool:
-    """Rejeita output truncado antes do Maven — conta { vs } fora de strings/comentários."""
+    """Rejects truncated output before Maven — counts { vs } outside strings/comments."""
     depth = 0
     in_string = False
     in_char = False
@@ -240,6 +258,19 @@ def _is_brace_balanced(code: str) -> bool:
     return depth == 0
 
 
+_MAX_LINE_LEN = 500
+
+
+def _has_collapsed_line(code: str) -> bool:
+    """Returns True if any non-blank line exceeds _MAX_LINE_LEN characters.
+
+    A collapsed output (multiple statements merged onto one line by
+    fix_broken_generics or similar) will exceed this threshold and should be
+    rejected so the pipeline retries rather than committing broken formatting.
+    """
+    return any(len(line) > _MAX_LINE_LEN for line in code.splitlines() if line.strip())
+
+
 def _finalize(code: str) -> str | None:
     code = sanitize_java_code(code)
     code = unescape_html_entities(code)
@@ -250,14 +281,16 @@ def _finalize(code: str) -> str | None:
     if not code.strip():
         return None
     if not _is_brace_balanced(code):
-        return None  # output truncado — rejeita antes do Maven
+        return None  # truncated output — reject before Maven
+    if _has_collapsed_line(code):
+        return None  # collapsed lines — reject before Maven
     return code.strip()
 
 
 def _fix_missing_semicolons(code: str) -> str:
     lines = code.splitlines()
     refined = []
-    # Skill para corrigir falta de ponto e vírgula em locais óbvios
+    # Skill to fix missing semicolons in obvious locations
     needs_semicolon = re.compile(r'^\s*(return|throw|import|package|int|String|boolean|long|float|double)\b(?!.*;\s*$).*[^;{}]\s*$')
     for line in lines:
         stripped = line.strip()

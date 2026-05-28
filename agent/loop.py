@@ -3,9 +3,9 @@ from core.logger import log
 from core.utils import run_cmd
 from core.execution_logger import ExecutionLogger
 from core.reporter import PhaseReporter
-from java.compiler import maven_test
+from java.maven_build import maven_test
 from java.community_runner import run_skill
-from java.llm_reviewer import review_diff
+from java.diff_reviewer import review_diff
 from agent.observation import build_observation
 from agent.planner import call_planner
 from agent.skill_catalog import load_skill_config, is_reactive, is_terminal

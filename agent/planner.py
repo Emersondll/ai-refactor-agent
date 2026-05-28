@@ -92,9 +92,9 @@ def _call_claude_planner(observation: dict) -> list[dict]:
 
 
 def _compact_observation(observation: dict) -> dict:
-    """Reduz o tamanho da observação para caber no contexto do modelo local."""
+    """Reduces observation size to fit the local model context window."""
     files = observation.get("files", [])
-    # Ordena: pendentes primeiro, depois por nome; limita a 8 arquivos por ciclo
+    # Sort: pending first, then by name; limit to 8 files per cycle
     pending = [f for f in files if f.get("phases_pending")]
     pending.sort(key=lambda f: (f.get("build_failures", 0), f["name"]))
     top_files = pending[:8]
@@ -141,7 +141,7 @@ def _call_local_planner(observation: dict) -> list[dict]:
         if plan is not None:
             return plan
 
-        log("[Planner/Local] Não foi possível extrair JSON válido da resposta", "ERR")
+        log("[Planner/Local] Could not extract valid JSON from response", "ERR")
         return [{"skill": "done", "file": None, "reason": "local planner JSON parse error"}]
 
     except Exception as e:

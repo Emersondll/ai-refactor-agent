@@ -1,11 +1,11 @@
 """
-java/report_runner.py — Gera relatório Markdown de refatoração por classe.
+java/report_runner.py — Generates a Markdown refactoring report per class.
 
-Fluxo:
-  1. Lê execution.jsonl e agrupa eventos por arquivo
-  2. Constrói sumário estruturado (o que foi aplicado, o que foi pulado e por quê)
-  3. Envia o sumário ao LLM para gerar narrativa legível em Markdown
-  4. Salva em logs/refactoring_report.md e REFACTORING_REPORT.md na raiz do repo
+Flow:
+  1. Reads execution.jsonl and groups events by file
+  2. Builds a structured summary (what was applied, skipped, and why)
+  3. Sends the summary to the LLM to generate a readable Markdown narrative
+  4. Saves to logs/refactoring_report.md and src/main/resources/docs/ in the repo
 """
 
 import json
@@ -15,47 +15,48 @@ from datetime import datetime
 
 from core.logger import log
 from core.live_state import update as _live
+from config import BASE_DIR, REPO_GITHUB_URL
 
 # ---------------------------------------------------------------------------
-# Mapeamentos legíveis
+# Human-readable label mappings
 # ---------------------------------------------------------------------------
 
 _PHASE_LABELS = {
-    "clean-imports":        "Remoção de imports não utilizados (OpenRewrite)",
-    "format":               "Formatação de código (Google Java Format)",
-    "final-keywords":       "Adição de modificadores `final`",
-    "naming-conventions":   "Correção de convenções de nomenclatura",
-    "dead-code":            "Remoção de código morto",
-    "simplify-code":        "Simplificação de código (expressões, ternários)",
-    "modernize-syntax":     "Modernização de sintaxe Java (streams, lambdas, var)",
-    "static-analysis":      "Análise estática e correções (Spotbugs/PMD patterns)",
-    "guard-clauses":        "Refatoração de guard clauses (early return)",
-    "method-extraction":    "Extração de métodos longos",
-    "solid-dip":            "Aplicação de DIP — injeção de dependência via construtor",
-    "controller-lean":      "Remoção de lógica de negócio do Controller",
-    "flow-refactor":        "Refatoração de fluxo de controle",
-    "dry-check":            "Verificação e eliminação de duplicação (DRY)",
-    "javadoc":              "Inserção de Javadoc em métodos públicos",
-    "initial_coverage_fix": "Geração automática de testes de cobertura",
-    "flow-dry":             "Verificação DRY de fluxos (dry-run)",
+    "clean-imports":        "Removal of unused imports (OpenRewrite)",
+    "format":               "Code formatting (Google Java Format)",
+    "final-keywords":       "Addition of `final` modifiers",
+    "naming-conventions":   "Naming convention corrections",
+    "dead-code":            "Dead code removal",
+    "simplify-code":        "Code simplification (expressions, ternaries)",
+    "modernize-syntax":     "Java syntax modernization (streams, lambdas, var)",
+    "static-analysis":      "Static analysis and fixes (SpotBugs/PMD patterns)",
+    "guard-clauses":        "Guard clause refactoring (early return)",
+    "method-extraction":    "Long method extraction",
+    "solid-dip":            "DIP application — dependency injection via constructor",
+    "controller-lean":      "Business logic removal from Controller",
+    "flow-refactor":        "Control flow refactoring",
+    "dry-check":            "Duplication detection and elimination (DRY)",
+    "javadoc":              "Javadoc insertion on public methods",
+    "initial_coverage_fix": "Automatic test coverage generation",
+    "flow-dry":             "DRY check for flows (dry-run)",
 }
 
 _SKIP_LABELS = {
-    "no_business_logic":        "Tipo estrutural sem lógica de negócio (interface, @Document, @Entity, repository, DTO) — fase não aplicável",
-    "not_a_controller":         "Não é um @RestController — fase controller-lean não se aplica",
-    "no_change":                "Código já em conformidade com os critérios da fase — nenhuma alteração necessária",
-    "no_pattern_match":         "Nenhum método da classe apresentou o padrão alvo da fase — fase não aplicável",
-    "compile_failed":           "Geração falhou após múltiplas tentativas de reparo — alteração revertida para preservar build estável",
-    "already_documented":       "Todos os métodos públicos já possuem Javadoc",
-    "deferred_field_injection": "Classe usa @Autowired em campo sem construtor explícito — aguarda conversão para constructor injection (solid-dip)",
-    "repair_no_change":         "Reparo automático não produziu alteração válida — operação cancelada",
-    "no_new_instantiation":     "Classe não contém instanciações concretas (new ConcreteClass()) — injeção de dependência não aplicável",
-    "bootstrap_class":          "Classe de configuração/bootstrap (@SpringBootApplication, @Configuration) — DIP não aplicável",
-    "deferred_flow_refactor":   "Classe já foi processada por flow-refactor — solid-dip deferido para evitar conflito estrutural",
-    "deferred_repeat_failure":  "Classe falhou nesta fase em ciclo anterior — deferida para revisão manual",
-    "timeout":                  "Processamento excedeu o tempo limite por arquivo — operação cancelada para não bloquear o pipeline",
-    "permanent_skip":           "Classe atingiu o limite de falhas consecutivas nesta fase — marcada para revisão manual",
-    "code_structure_changed":   "LLM alterou estrutura do código além dos comentários Javadoc — alteração rejeitada para preservar integridade",
+    "no_business_logic":        "Structural type without business logic (interface, @Document, @Entity, repository, DTO) — phase not applicable",
+    "not_a_controller":         "Not a @RestController — controller-lean phase does not apply",
+    "no_change":                "Code already compliant with phase criteria — no changes needed",
+    "no_pattern_match":         "No method in the class matched the target pattern — phase not applicable",
+    "compile_failed":           "Generation failed after multiple repair attempts — change reverted to preserve stable build",
+    "already_documented":       "All public methods already have Javadoc",
+    "deferred_field_injection": "Class uses @Autowired on field without explicit constructor — awaiting conversion to constructor injection (solid-dip)",
+    "repair_no_change":         "Automatic repair produced no valid change — operation cancelled",
+    "no_new_instantiation":     "Class has no concrete instantiations (new ConcreteClass()) — dependency injection not applicable",
+    "bootstrap_class":          "Configuration/bootstrap class (@SpringBootApplication, @Configuration) — DIP not applicable",
+    "deferred_flow_refactor":   "Class was already processed by flow-refactor — solid-dip deferred to avoid structural conflict",
+    "deferred_repeat_failure":  "Class failed this phase in a previous cycle — deferred for manual review",
+    "timeout":                  "Processing exceeded per-file time limit — operation cancelled to avoid blocking pipeline",
+    "permanent_skip":           "Class reached the consecutive failure limit in this phase — marked for manual review",
+    "code_structure_changed":   "LLM altered code structure beyond Javadoc comments — change rejected to preserve integrity",
 }
 
 
@@ -114,12 +115,12 @@ def _build_fix_candidates_section(entries: list[dict], fixes: list[dict] | None 
     lines = [
         "## Fix Candidates",
         "",
-        "Os seguintes arquivos estão em `permanent_skip` mas fixes recentes "
-        "em `logs/fix_metadata.json` cobrem o padrão de erro deles. "
-        "Considere re-rodar com `FORCE_RETRY=<basename>` no `.env` "
-        "ou `python main.py --clear-skip <basename>` antes do próximo run.",
+        "The following files are in `permanent_skip` but recent fixes "
+        "in `logs/fix_metadata.json` cover their error patterns. "
+        "Consider re-running with `FORCE_RETRY=<basename>` in `.env` "
+        "or `python main.py --clear-skip <basename>` before the next run.",
         "",
-        "| Arquivo | Fixes candidatos |",
+        "| File | Candidate fixes |",
         "|---------|------------------|",
     ]
     for basename, fix_ids in candidates:
@@ -129,7 +130,7 @@ def _build_fix_candidates_section(entries: list[dict], fixes: list[dict] | None 
 
 
 # ---------------------------------------------------------------------------
-# Extração de dados do JSONL
+# JSONL data extraction
 # ---------------------------------------------------------------------------
 
 def _load_session(jsonl_path: str) -> list[dict]:
@@ -143,7 +144,7 @@ def _load_session(jsonl_path: str) -> list[dict]:
 
 
 def _build_class_summaries(session: list[dict]) -> dict:
-    """Retorna dict {filename: {accepted:[phases], skipped:{phase:reason}, reverted:[phases]}}."""
+    """Returns dict {filename: {accepted:[phases], skipped:{phase:reason}, reverted:[phases]}}."""
     summaries = {}
     coverages = []
 
@@ -170,7 +171,7 @@ def _build_class_summaries(session: list[dict]) -> dict:
                 summaries[fi]["accepted"].append(ph)
 
         elif ev == "FILE_SKIPPED":
-            raw_reason = msg.replace("Pulado: ", "").strip()
+            raw_reason = msg.replace("Pulado: ", "").replace("Skipped: ", "").strip()
             summaries[fi]["skipped"][ph] = raw_reason
 
         elif ev == "FILE_REVERTED":
@@ -181,7 +182,7 @@ def _build_class_summaries(session: list[dict]) -> dict:
 
 
 def _build_text_summary(summaries: dict, coverages: list, session: list[dict]) -> str:
-    """Serializa o sumário estruturado como texto compacto para o LLM."""
+    """Serializes the structured summary as compact text for the LLM."""
     start_ts = session[0]["timestamp"]
     end_ts   = session[-1]["timestamp"]
     dur_sec  = int((datetime.fromisoformat(end_ts) - datetime.fromisoformat(start_ts)).total_seconds())
@@ -189,12 +190,12 @@ def _build_text_summary(summaries: dict, coverages: list, session: list[dict]) -
     m, _ = divmod(r, 60)
 
     lines = [
-        f"CICLO: {start_ts[:10]}  DURAÇÃO: {h}h {m}m",
+        f"CYCLE: {start_ts[:10]}  DURATION: {h}h {m}m",
         "",
     ]
     if coverages:
         for ts, val, msg in coverages:
-            lines.append(f"COBERTURA [{ts[11:16]}]: {val:.2f}% — {msg}")
+            lines.append(f"COVERAGE [{ts[11:16]}]: {val:.2f}% — {msg}")
     lines.append("")
 
     for fname in sorted(summaries):
@@ -204,18 +205,18 @@ def _build_text_summary(summaries: dict, coverages: list, session: list[dict]) -
         skip_items = {
             ph: _SKIP_LABELS.get(r, r)
             for ph, r in s["skipped"].items()
-            if ph not in s["accepted"]  # ignora skips em fases onde depois foi aceito
+            if ph not in s["accepted"]  # ignore skips in phases where the file was later accepted
         }
 
-        lines.append(f"ARQUIVO: {fname}")
+        lines.append(f"FILE: {fname}")
         if acc_labels:
-            lines.append(f"  MELHORIAS APLICADAS: {' | '.join(acc_labels)}")
+            lines.append(f"  IMPROVEMENTS APPLIED: {' | '.join(acc_labels)}")
         if rev_labels:
-            lines.append(f"  REVERTIDO EM: {' | '.join(rev_labels)}")
+            lines.append(f"  REVERTED IN: {' | '.join(rev_labels)}")
         if skip_items:
             for ph, reason in skip_items.items():
                 ph_label = _PHASE_LABELS.get(ph, ph)
-                lines.append(f"  PULADO [{ph_label}]: {reason}")
+                lines.append(f"  SKIPPED [{ph_label}]: {reason}")
         lines.append("")
 
     return "\n".join(lines)
@@ -225,39 +226,39 @@ def _build_text_summary(summaries: dict, coverages: list, session: list[dict]) -
 # Chamada LLM
 # ---------------------------------------------------------------------------
 
-_REPORT_PROMPT = """Você é um engenheiro de software senior revisando um ciclo de refatoração automática de um projeto Java Spring Boot.
+_REPORT_PROMPT = """You are a senior software engineer reviewing an automated refactoring cycle of a Java Spring Boot project.
 
-Abaixo estão os dados estruturados de execução do pipeline de refatoração:
+Below are the structured execution data from the refactoring pipeline:
 
 {summary}
 
-Com base nesses dados, gere um RELATÓRIO TÉCNICO em Markdown com a seguinte estrutura:
+Based on this data, generate a TECHNICAL REPORT in Markdown with the following structure:
 
-# Relatório de Refatoração — {date}
+# Refactoring Report — {date}
 
-## Visão Geral
-[Parágrafo de 3-4 frases descrevendo o ciclo: duração, cobertura inicial e final, quantas classes foram modificadas, quantas puladas e quantas revertidas.]
+## Overview
+[3-4 sentence paragraph describing the cycle: duration, initial and final coverage, how many classes were modified, skipped, and reverted.]
 
-## Cobertura de Testes
-[Tabela ou lista com a trajetória de cobertura: inicial → pós-geração de testes → final.]
+## Test Coverage
+[Table or list showing the coverage trajectory: initial → post test generation → final.]
 
-## Classes Modificadas
-[Para cada arquivo que teve MELHORIAS APLICADAS, um item com: nome da classe em negrito, lista das melhorias aplicadas com descrição do impacto no código.]
+## Modified Classes
+[For each file with APPLIED IMPROVEMENTS, one item with: class name in bold, list of applied improvements with description of the impact on the code.]
 
-## Classes Puladas
-[Para cada arquivo que foi PULADO em TODAS as fases de refatoração, um item com: nome da classe em negrito, motivo claro e objetivo (por que a classe não precisava de alteração).]
+## Skipped Classes
+[For each file that was SKIPPED in ALL refactoring phases, one item with: class name in bold, clear and objective reason (why the class did not need changes).]
 
-## Classes Revertidas
-[Para cada arquivo que teve REVERTIDO EM, um item com: nome da classe em negrito, fase que reverteu, motivo técnico provável e recomendação de ação manual.]
+## Reverted Classes
+[For each file with REVERTED IN, one item with: class name in bold, phase that reverted, probable technical reason, and manual action recommendation.]
 
-## Observações e Próximos Passos
-[2-3 observações sobre padrões identificados no ciclo e sugestões de melhoria.]
+## Observations and Next Steps
+[2-3 observations about patterns identified in the cycle and improvement suggestions.]
 
-Regras:
-- Escreva em Português do Brasil
-- Seja objetivo e técnico, mas legível para desenvolvedores sem contexto do pipeline
-- Use linguagem afirmativa: "foram aplicadas X melhorias", não "o agente tentou"
-- Não mencione detalhes internos do agente (model names, fase IDs, etc.)
+Rules:
+- Write in Brazilian Portuguese
+- Be objective and technical, but readable for developers without pipeline context
+- Use affirmative language: "X improvements were applied", not "the agent tried"
+- Do not mention internal agent details (model names, phase IDs, etc.)
 """
 
 
@@ -270,22 +271,22 @@ def _call_llm_for_report(summary_text: str, date: str) -> str | None:
 
     prompt = _REPORT_PROMPT.format(summary=summary_text, date=date)
 
-    # Tenta Claude primeiro (melhor qualidade para relatório narrativo)
+    # Try Claude first (best quality for narrative reports)
     try:
         result = call_claude(prompt)
         if result and len(result) > 200:
-            log("[Report] Relatório gerado via Claude ✓", "OK")
+            log("[Report] Report generated via Claude ✓", "OK")
             return result
     except Exception:
         pass
 
-    # Fallback: modelo local — chama call_model diretamente (output é Markdown, não Java)
+    # Fallback: local model — call call_model directly (output is Markdown, not Java)
     try:
         from ai.model import call_model
         raw, is_oom = call_model(MODEL_REVIEWER, prompt, temperature=0.3,
                                  num_predict=4096, timeout=600)
         if raw and not is_oom and len(raw.strip()) > 200:
-            log("[Report] Relatório gerado via modelo local ✓", "OK")
+            log("[Report] Report generated via local model ✓", "OK")
             return raw.strip()
     except Exception:
         pass
@@ -294,11 +295,11 @@ def _call_llm_for_report(summary_text: str, date: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Gerador de fallback (sem LLM)
+# Fallback generator (no LLM)
 # ---------------------------------------------------------------------------
 
 def _build_fallback_report(summaries: dict, coverages: list, session: list[dict]) -> str:
-    """Relatório estruturado puro, sem narrativa LLM."""
+    """Pure structured report, no LLM narrative."""
     start_ts = session[0]["timestamp"]
     end_ts   = session[-1]["timestamp"]
     dur_sec  = int((datetime.fromisoformat(end_ts) - datetime.fromisoformat(start_ts)).total_seconds())
@@ -314,32 +315,32 @@ def _build_fallback_report(summaries: dict, coverages: list, session: list[dict]
     ]
 
     lines = [
-        f"# Relatório de Refatoração — {date}",
+        f"# Refactoring Report — {date}",
         "",
-        f"**Duração:** {h}h {m}m  |  **Classes modificadas:** {len(accepted_files)}  |  "
-        f"**Puladas:** {len(skipped_only)}  |  **Revertidas:** {len(reverted_files)}",
+        f"**Duration:** {h}h {m}m  |  **Modified classes:** {len(accepted_files)}  |  "
+        f"**Skipped:** {len(skipped_only)}  |  **Reverted:** {len(reverted_files)}",
         "",
     ]
 
     if coverages:
-        lines += ["## Cobertura de Testes", ""]
+        lines += ["## Test Coverage", ""]
         for _, val, msg in coverages:
             lines.append(f"- {msg}")
         lines.append("")
 
     if accepted_files:
-        lines += ["## Classes Modificadas", ""]
+        lines += ["## Modified Classes", ""]
         for fname in sorted(accepted_files):
             s = summaries[fname]
             lines.append(f"### {fname}")
             for ph in s["accepted"]:
                 lines.append(f"- {_PHASE_LABELS.get(ph, ph)}")
             if s["reverted"]:
-                lines.append(f"- ⚠ Revertido em: {', '.join(_PHASE_LABELS.get(p,p) for p in s['reverted'])}")
+                lines.append(f"- ⚠ Reverted in: {', '.join(_PHASE_LABELS.get(p,p) for p in s['reverted'])}")
             lines.append("")
 
     if skipped_only:
-        lines += ["## Classes Puladas", ""]
+        lines += ["## Skipped Classes", ""]
         for fname in sorted(skipped_only):
             s = summaries[fname]
             lines.append(f"### {fname}")
@@ -352,44 +353,63 @@ def _build_fallback_report(summaries: dict, coverages: list, session: list[dict]
             lines.append("")
 
     if reverted_files:
-        lines += ["## Classes Revertidas", ""]
+        lines += ["## Reverted Classes", ""]
         for fname in sorted(reverted_files):
             s = summaries[fname]
             lines.append(f"### {fname}")
             for ph in s["reverted"]:
-                lines.append(f"- Fase: {_PHASE_LABELS.get(ph, ph)}")
+                lines.append(f"- Phase: {_PHASE_LABELS.get(ph, ph)}")
             lines.append("")
 
     return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
-# Ponto de entrada
+# Entry point
 # ---------------------------------------------------------------------------
 
+def _build_report_with_header(report_body: str, repo_path: str) -> str:
+    """Prepend the fixed Markdown header template to the LLM-generated report body."""
+    template_path = os.path.join(BASE_DIR, "templates", "refactoring_report_header.md")
+    try:
+        with open(template_path, encoding="utf-8") as f:
+            header = f.read()
+    except Exception:
+        header = ""
+
+    if header:
+        repo_name = os.path.basename(repo_path.rstrip("/\\"))
+        repo_url  = REPO_GITHUB_URL or f"https://github.com/<org>/{repo_name}"
+        header = header.replace("{repo_url}", repo_url).replace("{repo_name}", repo_name)
+        # Strip the HTML comment block before rendering
+        header = re.sub(r"<!--.*?-->", "", header, flags=re.DOTALL).strip()
+        return header + "\n\n" + report_body
+    return report_body
+
+
 def run_report(repo_path: str, jsonl_path: str, logs_dir: str, exec_logger=None) -> None:
-    """Gera o relatório de refatoração e salva nos diretórios de log e no repo."""
+    """Generates the refactoring report and saves it to the logs directory and the repo."""
     _live(active_skill="report", current_file="")
-    log("[Report] Carregando eventos do ciclo...")
+    log("[Report] Loading cycle events...")
 
     if not os.path.exists(jsonl_path) or os.path.getsize(jsonl_path) == 0:
-        log("[Report] execution.jsonl vazio — relatório não gerado", "WARN")
+        log("[Report] execution.jsonl is empty — report not generated", "WARN")
         return
 
     session = _load_session(jsonl_path)
     summaries, coverages = _build_class_summaries(session)
     if not summaries:
-        log("[Report] Nenhum evento de arquivo encontrado — relatório não gerado", "WARN")
+        log("[Report] No file events found — report not generated", "WARN")
         return
 
     date = session[0]["timestamp"][:10]
     summary_text = _build_text_summary(summaries, coverages, session)
 
-    log("[Report] Solicitando narrativa ao LLM...")
+    log("[Report] Requesting narrative from LLM...")
     report_md = _call_llm_for_report(summary_text, date)
 
     if not report_md:
-        log("[Report] LLM indisponível — gerando relatório estruturado", "WARN")
+        log("[Report] LLM unavailable — generating structured report", "WARN")
         report_md = _build_fallback_report(summaries, coverages, session)
 
     # M11: Fix Candidates section
@@ -407,19 +427,24 @@ def run_report(repo_path: str, jsonl_path: str, logs_dir: str, exec_logger=None)
     except Exception as _exc:
         log(f"M11 fix-candidates section skipped: {_exc}", "WARN")
 
-    # Salva no diretório de logs
+    # Build the full report: fixed header + LLM/fallback body
+    full_report_md = _build_report_with_header(report_md, repo_path)
+
+    # Save to logs directory (used by the dashboard)
     log_report_path = os.path.join(logs_dir, "refactoring_report.md")
     with open(log_report_path, "w", encoding="utf-8") as f:
-        f.write(report_md)
-    log(f"[Report] Salvo em {log_report_path}", "OK")
+        f.write(full_report_md)
+    log(f"[Report] Saved to {log_report_path}", "OK")
 
-    # Salva na raiz do repositório alvo (será commitado)
-    repo_report_path = os.path.join(repo_path, "REFACTORING_REPORT.md")
+    # Save to src/main/resources/docs/ inside the target repo (committed with the code)
+    docs_dir = os.path.join(repo_path, "src", "main", "resources", "docs")
+    os.makedirs(docs_dir, exist_ok=True)
+    repo_report_path = os.path.join(docs_dir, "refactoring_report.md")
     with open(repo_report_path, "w", encoding="utf-8") as f:
-        f.write(report_md)
-    log(f"[Report] Salvo em {repo_report_path}", "OK")
+        f.write(full_report_md)
+    log(f"[Report] Saved to {repo_report_path}", "OK")
 
     if exec_logger:
-        exec_logger.log_phase_start("REPORT_DONE", "Relatório de refatoração gerado")
+        exec_logger.log_phase_start("REPORT_DONE", "Refactoring report generated")
 
     _live(active_skill="", current_file="")
