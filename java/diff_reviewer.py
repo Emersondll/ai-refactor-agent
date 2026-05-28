@@ -31,10 +31,10 @@ def review_diff(diff: str, criteria: str, model: str) -> Literal["APPROVE", "REJ
 
 def _build_prompt(diff: str, criteria: str) -> str:
     return (
-        "Você é um revisor de código Java. Analise o diff abaixo.\n\n"
-        f"CRITÉRIOS DE APROVAÇÃO:\n{criteria}\n\n"
+        "You are a Java code reviewer. Analyze the diff below.\n\n"
+        f"APPROVAL CRITERIA:\n{criteria}\n\n"
         f"DIFF:\n{diff}\n\n"
-        "Responda APENAS com uma das opções:\n"
-        "APPROVE: <motivo em 1 linha>\n"
-        "REJECT: <motivo em 1 linha>"
+        "Respond ONLY with one of:\n"
+        "APPROVE: <reason in 1 line>\n"
+        "REJECT: <reason in 1 line>"
     )

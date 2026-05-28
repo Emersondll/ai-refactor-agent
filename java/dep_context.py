@@ -1,12 +1,12 @@
 """
-java/context.py — Localização: java/context.py
+java/context.py — Dependency context builder for LLM prompts.
 
-Cache-first: se dep_context para este arquivo já está em cache (por hash),
-retorna imediatamente sem fazer os.walk no projeto.
+Cache-first: if dep_context for this file is already cached (by content hash),
+returns immediately without walking the project.
 
-_build_dep_context: lógica original de geração (renomeada de função interna).
-_extract_simplified_header: otimizada para emitir apenas assinaturas
-  de métodos públicos/protegidos — remove campos privados e comentários.
+_build_dep_context: core generation logic.
+_extract_simplified_header: emits only public/protected method signatures —
+  strips private fields and comments.
 """
 
 import os
@@ -17,10 +17,7 @@ from memory.cache import sha12
 
 def get_dependency_context(file_code: str, repo_path: str,
                            cache=None) -> str:
-    """
-    Retorna contexto de dependências para o arquivo.
-    Cache-first: usa hash do conteúdo do arquivo como chave.
-    """
+    """Returns dependency context for the file. Cache-first by content hash."""
     if cache is not None:
         file_hash = sha12(file_code)
         cached = cache.get_dep_context(file_hash)
@@ -41,7 +38,7 @@ def get_dependency_context(file_code: str, repo_path: str,
 
 
 def _build_dep_context(file_code: str, repo_path: str) -> str:
-    """Gera contexto de dependências varrendo o projeto (sem cache)."""
+    """Generates dependency context by walking the project (no cache)."""
     package_match = re.search(r'^package\s+([\w.]+);', file_code, re.MULTILINE)
     target_package = package_match.group(1) if package_match else "unknown"
 
@@ -102,26 +99,24 @@ def _find_class_file(class_name: str, repo_path: str) -> str | None:
 
 def _extract_simplified_header(code: str, full_name: str = "") -> str:
     """
-    Extrai assinaturas de métodos públicos/protegidos/package-private.
-    Para enums, preserva os valores declarados para evitar alucinação do LLM.
-    Para records, injeta CONSTRUCTOR CALL com nomes reais dos parâmetros.
-    Remove: membros private (métodos e campos), comentários, imports, corpos de métodos.
-    Mantém: public, protected, package-private (sem modificador) — acessíveis de testes
-    no mesmo pacote.
+    Extracts public/protected/package-private method signatures.
+    For enums: preserves declared values to prevent LLM hallucination.
+    For records: injects a CONSTRUCTOR CALL hint with real parameter names.
+    Removes: private members, comments, imports, method bodies.
+    Keeps: public, protected, package-private — accessible from same-package tests.
     """
     is_enum = bool(re.search(r'\benum\b', code))
     is_record = bool(re.search(r'\brecord\b', code))
 
-    # Pre-extract constructor call hint (records and regular classes)
-    # A: inclui "Tipo nome" (não só nome) para que o LLM saiba o tipo exato de cada parâmetro
-    # e não confunda, ex., Long version com BigDecimal, ou String amount com BigDecimal amount.
+    # Pre-extract constructor call hint — includes "Type name" so the LLM knows the
+    # exact type of each parameter and doesn't confuse e.g. Long version with BigDecimal.
     constructor_hint = ""
     if is_record:
         name_match = re.search(r'\brecord\s+(\w+)\s*\(', code)
         if name_match:
             class_name = name_match.group(1)
-            # Extrai parâmetros com leitura de parênteses balanceados — @JsonProperty("x") tem ) interno
-            start = name_match.end() - 1  # posição do '(' inicial
+            # Extract params using balanced paren reading — @JsonProperty("x") has an inner )
+            start = name_match.end() - 1  # position of the opening '('
             depth, end = 0, start
             for i in range(start, len(code)):
                 if code[i] == '(':
@@ -135,7 +130,7 @@ def _extract_simplified_header(code: str, full_name: str = "") -> str:
             params = [p.strip() for p in params_raw.split(',') if p.strip()]
             typed_params = []
             for p in params:
-                # Remove anotações e seus argumentos para isolar "Tipo nome"
+                # Strip annotations and their arguments to isolate "Type name"
                 clean = re.sub(r'@\w+(?:\([^)]*\))?\s*', '', p).strip()
                 words = clean.split()
                 if len(words) >= 2:
@@ -153,7 +148,7 @@ def _extract_simplified_header(code: str, full_name: str = "") -> str:
                     + ", ".join(typed_params) + ")"
                 )
     elif not is_enum:
-        # C1: classes regulares com construtor explícito também recebem CONSTRUCTOR CALL hint.
+        # Regular classes with explicit constructor also get the CONSTRUCTOR CALL hint.
         class_name_match = re.search(r'\bclass\s+(\w+)', code)
         if class_name_match:
             _cls = class_name_match.group(1)
@@ -209,26 +204,24 @@ def _extract_simplified_header(code: str, full_name: str = "") -> str:
         if not class_def_found:
             continue
 
-        # Enum: inclui constantes literalmente para o LLM não inventar valores
+        # Enum: include constants verbatim so the LLM does not invent values
         if is_enum and in_enum_constants:
             if re.match(r'^[A-Z][A-Z0-9_]+', stripped):
                 header_lines.append("    " + stripped)
                 if stripped.endswith(';'):
                     in_enum_constants = False
                 continue
-            # Linha sem padrão de constante encerra a seção
+            # Line without a constant pattern ends the section
             if not stripped.startswith(('/', '*', '@')):
                 in_enum_constants = False
 
-        # Membros com parênteses (métodos): público, protegido e package-private.
-        # Filtrar membros private (incluindo private static, private final, etc.)
+        # Members with parentheses (methods): public, protected, package-private.
+        # Skip private members (private static, private final, etc.)
         if re.match(r'private\b', stripped):
             continue
         if '(' in stripped:
-            # Excluir linhas que são chamadas de método ou anotações, não declarações
-            # Uma declaração de método começa com modificador ou tipo de retorno seguido por nome(
-            # Incluir: public/protected/package-private methods
-            # Excluir linhas que não são declarações de método (ex.: chamadas dentro de corpo)
+            # Skip lines that are method calls or annotations, not declarations.
+            # A method declaration starts with a modifier or return type followed by name(
             is_method_decl = bool(re.match(
                 r'(?:(?:public|protected|static|abstract|synchronized|final|default)\s+)*'
                 r'(?:[\w<>\[\]]+\s+)+\w+\s*\(',

@@ -1,26 +1,24 @@
 """
-scope_reducer.py — Localização: java/scope_reducer.py
+java/large_file_processor.py — Reduces processing scope for large files.
 
-Reduz o escopo de processamento para arquivos grandes.
+Problem solved:
+  Files > MAX_FILE_LINES were skipped entirely because 7b models
+  truncate context — code came out incomplete or corrupted.
 
-Problema resolvido:
-  Arquivos > MAX_FILE_LINES eram pulados completamente porque modelos 7b
-  truncam o contexto — o código saía incompleto ou corrompido.
+Solution:
+  Instead of skipping the file, process it method by method:
+    1. Extract the class header (package, imports, fields, constructors)
+    2. Extract each method individually
+    3. Build a minimal context: header + 1 method at a time
+    4. Send that reduced context to the model (< 50 lines in general)
+    5. Extract only the refactored method from the response
+    6. Replace the method in the original file
+    7. Repeat for all methods
 
-Solução:
-  Em vez de pular o arquivo, processa método a método:
-    1. Extrai o cabeçalho da classe (package, imports, fields, construtores)
-    2. Extrai cada método individualmente
-    3. Monta um contexto mínimo: cabeçalho + 1 método por vez
-    4. Envia esse contexto reduzido para o modelo (< 50 linhas em geral)
-    5. Extrai apenas o método refatorado da resposta
-    6. Substitui o método no arquivo original
-    7. Repete para todos os métodos
-
-Benefícios:
-  - Arquivos de 200+ linhas passam a ser processados
-  - Modelos 7b recebem contexto pequeno (alta qualidade de saída)
-  - Cada método é validado individualmente antes de ser aceito
+Benefits:
+  - Files of 200+ lines are now processed
+  - 7b models receive a small context (high output quality)
+  - Each method is validated individually before being accepted
 """
 
 import re
@@ -28,43 +26,43 @@ from dataclasses import dataclass
 
 
 # ---------------------------------------------------------------------------
-# Estruturas de dados
+# Data structures
 # ---------------------------------------------------------------------------
 
 @dataclass
 class JavaMethod:
-    """Representa um método extraído de uma classe Java."""
-    name: str             # nome do método (ex: performTransaction)
-    signature: str        # assinatura completa (ex: public void doX(String s))
-    full_text: str        # texto completo do método incluindo anotações
-    start_line: int       # linha de início (0-indexed)
-    end_line: int         # linha de fim (0-indexed, inclusive)
+    """Represents a method extracted from a Java class."""
+    name: str             # method name (e.g. performTransaction)
+    signature: str        # full signature (e.g. public void doX(String s))
+    full_text: str        # full method text including annotations
+    start_line: int       # start line (0-indexed)
+    end_line: int         # end line (0-indexed, inclusive)
 
 
 @dataclass
 class ClassHeader:
-    """Cabeçalho da classe: tudo antes do primeiro método."""
-    text: str             # texto completo do cabeçalho
-    end_line: int         # última linha do cabeçalho (0-indexed)
+    """Class header: everything before the first method."""
+    text: str             # full header text
+    end_line: int         # last line of the header (0-indexed)
 
 
 # ---------------------------------------------------------------------------
-# Regex de detecção
+# Detection regexes
 # ---------------------------------------------------------------------------
 
-# Detecta início de método: modificadores + tipo de retorno + nome + parênteses
+# Detects method start: modifiers + return type + name + parentheses
 _METHOD_START = re.compile(
-    r'^(\s*)'                                          # indentação
-    r'(?:(?:\/\*\*[\s\S]*?\*\/\s*)?)?'               # javadoc opcional
-    r'(?:@\w+(?:\([^)]*\))?\s*\n\s*)*'               # anotações
+    r'^(\s*)'                                          # indentation
+    r'(?:(?:\/\*\*[\s\S]*?\*\/\s*)?)?'               # optional javadoc
+    r'(?:@\w+(?:\([^)]*\))?\s*\n\s*)*'               # annotations
     r'(?:public|protected|private|static|final|'
-    r'abstract|synchronized|native|\s)+'              # modificadores
-    r'[\w<>\[\],\s?]+\s+'                             # tipo de retorno
-    r'(\w+)\s*\(',                                    # nome do método
+    r'abstract|synchronized|native|\s)+'              # modifiers
+    r'[\w<>\[\],\s?]+\s+'                             # return type
+    r'(\w+)\s*\(',                                    # method name
     re.MULTILINE,
 )
 
-# Detecta se uma linha é início de método (simples, linha a linha)
+# Detects whether a line is the start of a method (simple, line by line)
 _METHOD_LINE = re.compile(
     r'^\s*(?:@\w+(?:\([^)]*\))?\s*)*'
     r'(?:(?:public|protected|private|static|final|abstract|synchronized)\s+)+'
@@ -72,60 +70,60 @@ _METHOD_LINE = re.compile(
     r'\w+\s*\([^)]*\)\s*(?:throws\s+[\w\s,]+)?\s*\{'
 )
 
-# Detecta se uma linha é apenas uma anotação
+# Detects whether a line is a bare annotation
 _ANNOTATION_LINE = re.compile(r'^\s*@\w+')
 
 
 # ---------------------------------------------------------------------------
-# Extração de cabeçalho
+# Header extraction
 # ---------------------------------------------------------------------------
 
 def extract_class_header(code: str) -> ClassHeader:
     """
-    Extrai tudo antes do primeiro método: package, imports, anotações
-    de classe, declaração de classe, campos e construtores simples.
+    Extracts everything before the first method: package, imports, class
+    annotations, class declaration, fields, and simple constructors.
 
-    Heurística: o cabeçalho termina na linha anterior ao primeiro
-    método que não seja o construtor.
+    Heuristic: the header ends on the line before the first
+    non-constructor method.
     """
     lines = code.splitlines()
     
-    # Encontra o primeiro método público/privado com corpo
+    # Find the first public/private method with a body
     for i, line in enumerate(lines):
         if _METHOD_LINE.match(line):
-            # Retorna tudo até essa linha como cabeçalho
-            # (mantém a linha em branco antes do método)
+            # Return everything up to this line as the header
+            # (preserves the blank line before the method)
             end = max(0, i - 1)
             return ClassHeader(
                 text='\n'.join(lines[:i]),
                 end_line=end,
             )
     
-    # Nenhum método encontrado — retorna o arquivo inteiro como cabeçalho
+    # No method found — return the entire file as the header
     return ClassHeader(text=code, end_line=len(lines) - 1)
 
 
 # ---------------------------------------------------------------------------
-# Extração de métodos
+# Method extraction
 # ---------------------------------------------------------------------------
 
 def extract_methods(code: str) -> list[JavaMethod]:
     """
-    Extrai todos os métodos de uma classe Java usando balanceamento de chaves.
+    Extracts all methods from a Java class using brace counting.
 
-    Cada método inclui suas anotações e javadoc imediatamente acima dele.
+    Each method includes its annotations and Javadoc immediately above it.
     """
     lines = code.splitlines()
     methods: list[JavaMethod] = []
     i = 0
 
     while i < len(lines):
-        # Verifica se a linha (e possíveis linhas de anotação acima) marca início de método
+        # Check whether this line (and possible annotation lines above) marks a method start
         if _is_method_start(lines, i):
-            # Retrocede para incluir anotações e javadoc acima do método
+            # Go back to include annotations and Javadoc above the method
             method_start = _find_annotation_start(lines, i)
 
-            # Avança até encontrar a chave de abertura
+            # Advance to find the opening brace
             brace_line = i
             while brace_line < len(lines) and '{' not in lines[brace_line]:
                 brace_line += 1
@@ -134,13 +132,13 @@ def extract_methods(code: str) -> list[JavaMethod]:
                 i += 1
                 continue
 
-            # Balanceia chaves para encontrar o fim do método
+            # Balance braces to find the end of the method
             depth = 0
             j = brace_line
             while j < len(lines):
                 depth += lines[j].count('{') - lines[j].count('}')
                 if depth == 0:
-                    # Fim do método encontrado
+                    # End of method found
                     full_text = '\n'.join(lines[method_start:j + 1])
                     name = _extract_method_name(lines[i])
                     signature = lines[i].strip()
@@ -164,16 +162,16 @@ def extract_methods(code: str) -> list[JavaMethod]:
 
 
 def _is_method_start(lines: list[str], i: int) -> bool:
-    """Verifica se a linha i é o início de uma declaração de método."""
+    """Returns True if line i is the start of a method declaration."""
     line = lines[i]
-    # Ignora anotações puras
+    # Ignore bare annotations
     if _ANNOTATION_LINE.match(line) and '(' not in line:
         return False
     return bool(_METHOD_LINE.match(line))
 
 
 def _find_annotation_start(lines: list[str], i: int) -> int:
-    """Retrocede a partir da linha i para incluir anotações e javadoc."""
+    """Go back from line i to include annotations and Javadoc."""
     start = i
     j = i - 1
     while j >= 0:
@@ -189,27 +187,27 @@ def _find_annotation_start(lines: list[str], i: int) -> int:
 
 
 def _extract_method_name(signature_line: str) -> str:
-    """Extrai o nome do método de uma linha de assinatura."""
+    """Extracts the method name from a signature line."""
     m = re.search(r'(\w+)\s*\(', signature_line)
     return m.group(1) if m else 'unknown'
 
 
 # ---------------------------------------------------------------------------
-# Construção de contexto reduzido
+# Reduced context building
 # ---------------------------------------------------------------------------
 
 def build_method_context(header: ClassHeader, method: JavaMethod,
                           close_class: bool = True) -> str:
     """
-    Monta um contexto mínimo para o modelo processar um único método.
+    Builds a minimal context for the model to process a single method.
 
-    Estrutura:
-        [cabeçalho da classe — package, imports, declaração, fields]
-        [apenas o método alvo]
-        [fechamento da classe: }]
+    Structure:
+        [class header — package, imports, declaration, fields]
+        [target method only]
+        [class closing: }]
 
-    Isso garante que o modelo veja um arquivo Java sintaticamente completo
-    mas com apenas 1 método para refatorar — contexto muito menor.
+    This ensures the model sees a syntactically complete Java file
+    but with only 1 method to refactor — a much smaller context.
     """
     parts = [header.text.rstrip()]
     parts.append('')
@@ -220,20 +218,20 @@ def build_method_context(header: ClassHeader, method: JavaMethod,
 
 
 # ---------------------------------------------------------------------------
-# Extração do método refatorado da resposta da IA
+# Extracting the refactored method from the AI response
 # ---------------------------------------------------------------------------
 
 def extract_refactored_method(ai_response: str, original_method: JavaMethod) -> str | None:
     """
-    Extrai apenas o método refatorado da resposta da IA.
+    Extracts only the refactored method from the AI response.
 
-    A IA recebe um arquivo completo (header + 1 método) e devolve
-    um arquivo completo. Precisamos extrair apenas o método de volta.
+    The AI receives a complete file (header + 1 method) and returns
+    a complete file. We need to extract just the method back out.
 
-    Estratégia:
-        1. Busca pelo nome do método na resposta
-        2. Balanceia chaves a partir daí
-        3. Retorna apenas o bloco do método
+    Strategy:
+        1. Search for the method name in the response
+        2. Balance braces from there
+        3. Return only the method block
     """
     if not ai_response:
         return None
@@ -241,7 +239,7 @@ def extract_refactored_method(ai_response: str, original_method: JavaMethod) -> 
     lines = ai_response.splitlines()
     method_name = original_method.name
 
-    # Encontra a linha que declara o método pelo nome
+    # Find the line that declares the method by name
     method_line = None
     for i, line in enumerate(lines):
         if method_name + '(' in line and _METHOD_LINE.match(line):
@@ -249,7 +247,7 @@ def extract_refactored_method(ai_response: str, original_method: JavaMethod) -> 
             break
 
     if method_line is None:
-        # Tenta encontrar sem o regex estrito
+        # Try to find without the strict regex
         for i, line in enumerate(lines):
             if method_name + '(' in line and '{' in line:
                 method_line = i
@@ -258,10 +256,10 @@ def extract_refactored_method(ai_response: str, original_method: JavaMethod) -> 
     if method_line is None:
         return None
 
-    # Retrocede para incluir anotações e javadoc
+    # Go back to include annotations and Javadoc
     start = _find_annotation_start(lines, method_line)
 
-    # Balanceia chaves para extrair o bloco completo
+    # Balance braces to extract the full block
     depth = 0
     found_open = False
     for j in range(method_line, len(lines)):
@@ -275,15 +273,15 @@ def extract_refactored_method(ai_response: str, original_method: JavaMethod) -> 
 
 
 # ---------------------------------------------------------------------------
-# Substituição no arquivo original
+# Replacing in the original file
 # ---------------------------------------------------------------------------
 
 def replace_method_in_file(original_code: str, method: JavaMethod,
                             new_method_text: str) -> str:
     """
-    Substitui o método original pelo método refatorado no arquivo completo.
+    Replaces the original method with the refactored method in the full file.
 
-    Preserva todas as outras linhas do arquivo intactas.
+    Preserves all other lines of the file intact.
     """
     lines = original_code.splitlines()
     new_lines = (
@@ -295,27 +293,27 @@ def replace_method_in_file(original_code: str, method: JavaMethod,
 
 
 # ---------------------------------------------------------------------------
-# API principal
+# Main API
 # ---------------------------------------------------------------------------
 
 def is_large_file(code: str, threshold: int = 100) -> bool:
     """
-    Retorna True se o arquivo deve ser processado por método.
+    Returns True if the file should be processed method by method.
 
-    Threshold menor que MAX_FILE_LINES do refactor.py — processa
-    arquivos que antes eram pulados (200 linhas) e também os médios
-    que o 7b trata mal (100+ linhas).
+    Threshold lower than MAX_FILE_LINES in refactor.py — processes
+    files that were previously skipped (200 lines) as well as medium-sized
+    files that 7b models handle poorly (100+ lines).
     """
     return len(code.splitlines()) >= threshold
 
 
 def get_processable_methods(code: str) -> list[JavaMethod]:
     """
-    Retorna apenas os métodos que valem a pena processar individualmente.
-    Exclui: getters/setters triviais (< 5 linhas), métodos sem corpo.
+    Returns only the methods worth processing individually.
+    Excludes: trivial getters/setters (< 5 lines), methods without a body.
     """
     all_methods = extract_methods(code)
     return [
         m for m in all_methods
-        if len(m.full_text.splitlines()) >= 4   # exclui triviais de 1-3 linhas
+        if len(m.full_text.splitlines()) >= 4   # exclude trivial 1-3 line methods
     ]

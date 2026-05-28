@@ -1,9 +1,9 @@
 """
-java/flow_mapper.py — Mapeia fluxos de endpoint: controller → service → repository.
+java/endpoint_mapper.py — Maps endpoint flows: controller → service → repository.
 
-Usa análise estática via regex (sem parser Java).
+Uses static analysis via regex (no Java parser).
 
-Saída:
+Output:
   {
     "flows": [
       {
@@ -33,8 +33,8 @@ _REPO_MARKERS  = ("JpaRepository", "CrudRepository", "MongoRepository", "Reactiv
 
 def build_flow_map(repo_path: str) -> dict:
     """
-    Constrói o mapa de fluxos a partir dos controllers do projeto.
-    Retorna flows (lista) e file_sharing (arquivos em 2+ fluxos).
+    Builds the flow map from the project's controllers.
+    Returns flows (list) and file_sharing (files shared across 2+ flows).
     """
     java_files    = get_java_files(repo_path, tests=False)
     class_file_map = _build_class_file_map(java_files)

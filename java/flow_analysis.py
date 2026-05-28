@@ -5,8 +5,8 @@ from core.logger import log
 
 def get_vertical_slices(repo_path: str):
     """
-    Mapeia os fluxos verticais do projeto (Controller -> Service -> Repository).
-    Retorna uma lista de listas de arquivos (cada sub-lista é um 'Slice').
+    Maps the vertical flows of the project (Controller -> Service -> Repository).
+    Returns a list of file lists (each sub-list is one 'Slice').
     """
     java_files = []
     for root, _, files in os.walk(repo_path):
@@ -37,19 +37,19 @@ def get_vertical_slices(repo_path: str):
     return slices
 
 def _trace_dependencies(file_path: str, all_files: str, depth=0):
-    """Rastreia dependências via injeção de dependência (recursivo)."""
-    if depth > 3: return [] # Evita loops infinitos
+    """Traces dependencies via dependency injection (recursive). Max depth 3."""
+    if depth > 3: return []
     
     deps = []
     with open(file_path, 'r', encoding='utf-8') as f:
         code = f.read()
 
-    # Identifica nomes de classes injetadas via @Autowired ou Construtor
+    # Identify injected class names via @Autowired or constructor
     # 1. @Autowired private ServiceName service;
     # 2. private final ServiceName service; (constructor injection)
     injected_classes = re.findall(r'(?:@Autowired\s+)?(?:private|protected)\s+(?:final\s+)?(\w+)\s+\w+;', code)
-    
-    # 3. Injeção via construtor (argumentos do construtor)
+
+    # 3. Constructor injection (constructor arguments)
     class_name = os.path.basename(file_path).replace(".java", "")
     constructor_match = re.search(rf'public\s+{class_name}\s*\((.*?)\)', code, re.DOTALL)
     if constructor_match:
@@ -57,7 +57,7 @@ def _trace_dependencies(file_path: str, all_files: str, depth=0):
         for p in params:
             parts = p.strip().split()
             if len(parts) >= 2:
-                deps.append(parts[-2]) # O tipo da classe
+                deps.append(parts[-2])  # the class type
 
     injected_classes.extend(deps)
 
@@ -65,11 +65,11 @@ def _trace_dependencies(file_path: str, all_files: str, depth=0):
     for cls in set(injected_classes):
         if cls in ["String", "Long", "Integer", "BigDecimal", "List", "Map", "Optional"]: continue
         
-        # Procura o arquivo correspondente a essa classe
+        # Search for the file corresponding to this class
         for target in all_files:
             if os.path.basename(target) == f"{cls}.java":
                 found_files.append(target)
-                # Recursão para achar o próximo nível (ex: Service -> Repo)
+                # Recurse to find the next level (e.g. Service -> Repo)
                 found_files.extend(_trace_dependencies(target, all_files, depth + 1))
                 break
                 

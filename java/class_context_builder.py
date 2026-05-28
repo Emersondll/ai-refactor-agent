@@ -1,10 +1,10 @@
 """
-java/class_builder.py — Constrói representações da classe para prompts LLM.
+java/class_builder.py — Builds class representations for LLM prompts.
 
-Três operações:
-1. build_method_context  — esqueleto da classe + método alvo completo
-2. compress_done_methods — substitui corpos já refatorados por /* [refactored] */
-3. merge_method          — recompõe o arquivo original com o método atualizado pelo LLM
+Three operations:
+1. build_method_context  — class skeleton + full target method
+2. compress_done_methods — replaces already-refactored bodies with /* [refactored] */
+3. merge_method          — recomposes the original file with the LLM-updated method
 """
 
 import re
@@ -12,12 +12,12 @@ from java.method_extractor import MethodDef, extract_methods
 
 
 # ---------------------------------------------------------------------------
-# 1. Contexto para refatoração de método individual
+# 1. Context for individual method refactoring
 # ---------------------------------------------------------------------------
 
 def build_method_context(code: str, target: MethodDef, flow_context: str = "") -> str:
     """
-    Retorna prompt de contexto para o LLM refatorar apenas o método alvo:
+    Returns a context prompt for the LLM to refactor only the target method:
 
         [IMPORTS & CLASS DECLARATION]
         [FIELDS]
@@ -25,7 +25,7 @@ def build_method_context(code: str, target: MethodDef, flow_context: str = "") -
         [TARGET METHOD — full body]
         [FLOW CONTEXT — optional]
 
-    O LLM deve devolver APENAS o método alvo modificado (não a classe inteira).
+    The LLM must return ONLY the modified target method (not the full class).
     """
     skeleton = _build_class_skeleton(code, target)
     parts = [skeleton]
@@ -46,11 +46,11 @@ def build_method_context(code: str, target: MethodDef, flow_context: str = "") -
 
 
 def _build_class_skeleton(code: str, target: MethodDef) -> str:
-    """Extrai imports, declaração de classe, campos e assinaturas dos demais métodos."""
+    """Extracts imports, class declaration, fields, and signatures of other methods."""
     lines = code.splitlines()
     all_methods = extract_methods(code)
 
-    # Linhas que pertencem a algum método (exceto o alvo) → mostrar só assinatura
+    # Lines belonging to a method other than the target → show signature only
     method_line_ranges: list[tuple[int, int, MethodDef]] = []
     for m in all_methods:
         if m.cache_key != target.cache_key:
@@ -59,12 +59,12 @@ def _build_class_skeleton(code: str, target: MethodDef) -> str:
     skeleton_lines: list[str] = []
     i = 1  # 1-indexed
     for line in lines:
-        # Verifica se essa linha cai dentro de um método não-alvo
+        # Check if this line falls inside a non-target method
         in_other_method = False
         for start, end, m in method_line_ranges:
             if start <= i <= end:
                 in_other_method = True
-                # Emite apenas a primeira linha (assinatura) do método, depois pula o resto
+                # Emit only the first line (signature) of the method, then skip the rest
                 if i == start:
                     sig_line = m.annotations + [m.signature + " { /* ... */ }"]
                     skeleton_lines.append("    " + " ".join(sig_line))
@@ -73,18 +73,20 @@ def _build_class_skeleton(code: str, target: MethodDef) -> str:
             skeleton_lines.append(line)
         i += 1
 
-    return "### CLASS SKELETON (other methods shown as signatures only)\n```java\n" + \
-           "\n".join(skeleton_lines) + "\n```"
+    return (
+        "### CLASS SKELETON (other methods shown as signatures only)\n```java\n"
+        + "\n".join(skeleton_lines) + "\n```"
+    )
 
 
 # ---------------------------------------------------------------------------
-# 2. Compressor — para fases que ainda precisam da classe (ex: solid-dip)
+# 2. Compressor — for phases that still need the full class (e.g. solid-dip)
 # ---------------------------------------------------------------------------
 
 def compress_done_methods(code: str, done_keys: set[str]) -> str:
     """
-    Substitui o corpo dos métodos cujas chaves estão em done_keys
-    por /* [refactored] */, reduzindo o tamanho do prompt.
+    Replaces the body of methods whose keys are in done_keys with /* [refactored] */,
+    reducing prompt size.
     """
     if not done_keys:
         return code
@@ -106,7 +108,7 @@ def compress_done_methods(code: str, done_keys: set[str]) -> str:
     if not replacements:
         return code
 
-    # Aplica substituições de baixo para cima para não deslocar índices
+    # Apply replacements bottom-up to avoid shifting line indices
     replacements.sort(key=lambda x: x[0], reverse=True)
     result = lines[:]
 
@@ -117,14 +119,14 @@ def compress_done_methods(code: str, done_keys: set[str]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 3. Merge — recompõe o arquivo com o método atualizado pelo LLM
+# 3. Merge — recomposes the file with the LLM-updated method
 # ---------------------------------------------------------------------------
 
 def merge_method(original_code: str, original_method: MethodDef,
                  new_method_text: str) -> str:
     """
-    Substitui o método original pelo texto retornado pelo LLM.
-    Preserva todo o resto do arquivo intacto.
+    Replaces the original method with the LLM-returned text.
+    Preserves all other lines of the file intact.
     """
     new_method_text = _clean_llm_method(new_method_text)
     if not new_method_text:
@@ -134,7 +136,7 @@ def merge_method(original_code: str, original_method: MethodDef,
     start = original_method.start_line - 1  # 0-indexed
     end   = original_method.end_line        # exclusive
 
-    # Preserva a indentação original
+    # Preserve the original indentation
     indent = _detect_indent(lines[start] if start < len(lines) else "")
     new_lines = [
         (indent + l if l.strip() and not l.startswith(indent) else l)
@@ -146,15 +148,14 @@ def merge_method(original_code: str, original_method: MethodDef,
 
 
 def _clean_llm_method(text: str) -> str:
-    """Remove markdown code fences e texto antes/depois do método."""
-    # Remove ```java ... ``` ou ``` ... ```
+    """Removes markdown code fences and any text before/after the method."""
     text = re.sub(r'```(?:java)?\n?', '', text).strip()
 
-    # Se o LLM retornou a classe inteira, extrai apenas o método alvo
+    # If the LLM returned the full class, extract only the target method
     if re.search(r'\bclass\s+\w+', text):
         methods = extract_methods(text)
         if methods:
-            # Retorna o primeiro método não-construtor, ou o construtor se só houver isso
+            # Return the first non-constructor method, or the constructor if that's all there is
             non_ctors = [m for m in methods if not m.is_constructor]
             return (non_ctors[0] if non_ctors else methods[0]).full_text
 
@@ -162,24 +163,23 @@ def _clean_llm_method(text: str) -> str:
 
 
 def _detect_indent(line: str) -> str:
-    """Detecta o prefixo de indentação de uma linha."""
+    """Detects the indentation prefix of a line."""
     return re.match(r'^(\s*)', line).group(1)
 
 
 # ---------------------------------------------------------------------------
-# Utilitário: extrai o texto do método da resposta do LLM
+# Utility: extracts the method text from the LLM response
 # ---------------------------------------------------------------------------
 
 def extract_method_from_response(response: str) -> str:
     """
-    Extrai o bloco de método da resposta do LLM.
-    O LLM pode retornar: só o método, método em markdown fence, ou classe inteira.
+    Extracts the method block from the LLM response.
+    The LLM may return: just the method, method in a markdown fence, or the full class.
     """
-    # Tenta extrair bloco java de markdown
     fence_match = re.search(r'```(?:java)?\n(.*?)```', response, re.DOTALL)
     if fence_match:
         candidate = fence_match.group(1).strip()
-        # Se é uma classe, extrai o método
+        # If it's a class, extract the method
         if re.search(r'\bclass\s+\w+', candidate):
             methods = extract_methods(candidate)
             if methods:
@@ -187,5 +187,5 @@ def extract_method_from_response(response: str) -> str:
                 return (non_ctors[0] if non_ctors else methods[0]).full_text
         return candidate
 
-    # Sem fence — tenta detectar método diretamente
+    # No fence — try to detect method directly
     return _clean_llm_method(response)

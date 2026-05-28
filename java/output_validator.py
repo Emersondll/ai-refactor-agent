@@ -1,11 +1,11 @@
 """
-validator.py — Localização: java/validator.py
+java/validator.py — LLM output validator for generated Java code.
 
-SOLUÇÕES APLICADAS:
-  1. Ampliar is_modern_java — cobre mais padrões Java 14+ para eliminar
-     falsos positivos do javalang 0.13.0
-  3. Logar trecho do erro — ao rejeitar por sintaxe, loga as linhas
-     ao redor do erro para facilitar diagnóstico
+Applied fixes:
+  1. Expanded is_modern_java — covers more Java 14+ patterns to eliminate
+     false positives from javalang 0.13.0.
+  2. Error context logging — on syntax rejection, logs the surrounding lines
+     for immediate diagnosis.
 """
 
 import os
@@ -18,15 +18,15 @@ _JAVA_DECL = re.compile(r'\b(class|interface|enum|record)\s+\w+', re.MULTILINE)
 _DECL_NAME = re.compile(r'\b(?:class|interface|enum|record)\s+(\w+)', re.MULTILINE)
 
 # ---------------------------------------------------------------------------
-# Solução 1 — Ampliar is_modern_java
+# Fix 1 — Extend is_modern_java
 #
-# Antes cobria: record, case ->, """, sealed
-# Agora cobre também:
+# Previously covered: record, case ->, """, sealed
+# Now also covers:
 #   - var (Java 10+)
 #   - yield (switch expression Java 13+)
-#   - instanceof com pattern matching (Java 16+): instanceof String s
-#   - @interface (anotações personalizadas — javalang rejeita às vezes)
-#   - text block com indentação variável
+#   - instanceof with pattern matching (Java 16+): instanceof String s
+#   - @interface (custom annotations — javalang sometimes rejects them)
+#   - text block with variable indentation
 #   - non-sealed (Java 17+)
 #   - permits (Java 17+)
 # ---------------------------------------------------------------------------
@@ -54,13 +54,13 @@ _MODERN_JAVA_HINTS = [
     # Java 13+ — yield em switch
     re.compile(r'\byield\s+'),
 
-    # Annotation declarations (javalang às vezes rejeita @interface)
+    # Annotation declarations (javalang sometimes rejects @interface)
     re.compile(r'public\s+@interface\s+\w+'),
 ]
 
 
 def is_modern_java(code: str) -> bool:
-    """Detecta features de Java 10+ que javalang 0.13.0 não suporta."""
+    """Detects Java 10+ features that javalang 0.13.0 does not support."""
     for pattern in _MODERN_JAVA_HINTS:
         if pattern.search(code):
             return True
@@ -82,19 +82,19 @@ def has_invalid_imports(code: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Solução 3 — Logar trecho do erro
+# Fix 3 — Log error context snippet
 #
-# javalang retorna JavaSyntaxError com position (line, column).
-# Ao rejeitar, extraímos e logamos as 3 linhas ao redor do erro
-# para diagnóstico imediato sem precisar abrir o arquivo.
+# javalang returns JavaSyntaxError with position (line, column).
+# On rejection, extract and log the 3 lines around the error
+# for immediate diagnosis without having to open the file.
 # ---------------------------------------------------------------------------
 
 def _log_syntax_context(code: str, error: Exception) -> None:
-    """Loga as linhas ao redor do erro de sintaxe para diagnóstico."""
+    """Logs the lines surrounding a syntax error for immediate diagnosis."""
     lines = code.splitlines()
     error_line = None
 
-    # javalang expõe a posição via .position ou parseando a mensagem
+    # javalang exposes the position via .position or by parsing the message
     if hasattr(error, 'position') and error.position:
         try:
             error_line = int(error.position[0]) - 1  # 0-indexed
@@ -102,7 +102,7 @@ def _log_syntax_context(code: str, error: Exception) -> None:
             pass
 
     if error_line is None:
-        # Tenta extrair linha da string do erro
+        # Try to extract line number from the error string
         m = re.search(r'line\s+(\d+)', str(error), re.IGNORECASE)
         if m:
             error_line = int(m.group(1)) - 1
@@ -110,35 +110,35 @@ def _log_syntax_context(code: str, error: Exception) -> None:
     if error_line is not None and 0 <= error_line < len(lines):
         start = max(0, error_line - 2)
         end   = min(len(lines), error_line + 3)
-        log("  Contexto do erro:", "WARN")
+        log("  Error context:", "WARN")
         for i in range(start, end):
             marker = ">>>" if i == error_line else "   "
             log(f"  {marker} L{i+1:3}: {lines[i]}", "WARN")
     else:
-        # Sem posição — loga as primeiras linhas do trecho problemático
-        log("  Trecho inicial do código rejeitado:", "WARN")
+        # No position available — log the first lines of the rejected code
+        log("  First lines of rejected code:", "WARN")
         for i, line in enumerate(lines[:8]):
             log(f"    L{i+1:3}: {line}", "WARN")
 
 
 def check_syntax(code: str) -> tuple[bool, str]:
     """
-    Tenta validar sintaxe com javalang, mas o resultado é apenas indicativo.
+    Attempts to validate syntax with javalang — result is indicative only.
 
-    javalang 0.13.0 é não confiável:
-      - Rejeita Java 14+ (record, switch expression, var, yield, etc.)
-      - Retorna JavaSyntaxError com mensagem VAZIA tanto para erros reais
-        quanto para construtos que não conhece
-      - Não distingue falso positivo de erro real
+    javalang 0.13.0 is unreliable:
+      - Rejects Java 14+ (record, switch expression, var, yield, etc.)
+      - Returns JavaSyntaxError with an EMPTY message for both real errors
+        and constructs it does not understand
+      - Cannot distinguish false positives from real errors
 
-    Por isso:
-      - Parse OK → sinal positivo, aceita
-      - Parse falha com mensagem vazia → aceita (não confiável)
-      - Parse falha com mensagem + Java moderno → aceita
-      - Parse falha com mensagem real + Java clássico → rejeita + loga contexto
+    Therefore:
+      - Parse OK → positive signal, accept
+      - Parse fails with empty message → accept (not reliable)
+      - Parse fails with message + modern Java → accept
+      - Parse fails with real message + classic Java → reject + log context
 
-    O Maven (mvn clean test) é o validador definitivo de sintaxe.
-    O javalang serve apenas como filtro rápido para erros grosseiros.
+    Maven (mvn clean test) is the definitive syntax validator.
+    javalang serves only as a fast pre-filter for gross errors.
     """
     try:
         javalang.parse.parse(code)
@@ -146,44 +146,43 @@ def check_syntax(code: str) -> tuple[bool, str]:
     except javalang.parser.JavaSyntaxError as e:
         error_msg = str(e).strip()
 
-        # Mensagem vazia = javalang não sabe descrever o problema →
-        # não é confiável, deixa o Maven decidir
+        # Empty message = javalang cannot describe the problem → not reliable
         if not error_msg:
             return True, ""
 
-        # Java moderno que javalang não suporta
+        # Modern Java that javalang does not support
         if is_modern_java(code):
             return True, ""
 
-        # Único caso que rejeita: mensagem descritiva + Java clássico
+        # Only case that rejects: descriptive message + classic Java
         _log_syntax_context(code, e)
-        return False, f"Erro de sintaxe: {error_msg[:120]}"
+        return False, f"Syntax error: {error_msg[:120]}"
 
     except Exception as e:
-        # Qualquer outra exceção sem mensagem → aceita
+        # Any other exception without a message → accept
         if not str(e).strip() or is_modern_java(code):
             return True, ""
-        return False, f"Parse falhou: {type(e).__name__}: {str(e)[:80]}"
+        return False, f"Parse failed: {type(e).__name__}: {str(e)[:80]}"
 
 
 def is_valid_java(original: str, new: str) -> tuple[bool, str]:
-    """Pipeline de validação — apenas estrutura técnica."""
+    """Validation pipeline — structural checks only."""
 
     if not new or not new.strip():
-        return False, "Código vazio"
+        return False, "Empty code"
 
     if '\x1b' in new or '\u001b' in new:
-        return False, "ANSI detectado"
+        return False, "ANSI escape detected"
 
     if not _JAVA_DECL.search(new):
-        return False, "Sem declaração Java reconhecível"
+        return False, "No recognizable Java declaration"
 
     if has_invalid_imports(new):
-        return False, "Import com typo"
+        return False, "Import with typo"
 
     if new.count("{") != new.count("}"):
         return False, (
-            f"Chaves desbalanceadas: "
+            f"Unbalanced braces: "
             f"{new.count('{')}x'{{' vs {new.count('}')}x'}}'"
         )
 
@@ -194,8 +193,8 @@ def is_valid_java(original: str, new: str) -> tuple[bool, str]:
     return True, ""
 def validate_package_matches_path(code: str, file_path: str) -> tuple[bool, str]:
     """
-    Verifica se o package declarado corresponde ao caminho real do arquivo.
-    Impede alucinações de package como 'com.example' em vez de 'com.caju.transactionauthorizer.document'.
+    Verifies that the declared package matches the actual file path.
+    Prevents package hallucinations like 'com.example' instead of the real package.
     """
     pkg_match = re.search(r'^package\s+([\w.]+)\s*;', code, re.MULTILINE)
     if not pkg_match:
@@ -211,8 +210,8 @@ def validate_package_matches_path(code: str, file_path: str) -> tuple[bool, str]
             expected_pkg = dir_part.replace("/", ".")
             if expected_pkg and declared_pkg != expected_pkg:
                 return False, (
-                    f"Package '{declared_pkg}' não corresponde ao caminho do arquivo "
-                    f"(esperado: '{expected_pkg}')"
+                    f"Package '{declared_pkg}' does not match file path "
+                    f"(expected: '{expected_pkg}')"
                 )
             return True, ""
 
@@ -221,8 +220,8 @@ def validate_package_matches_path(code: str, file_path: str) -> tuple[bool, str]
 
 def validate_class_name_matches_file(code: str, file_path: str) -> tuple[bool, str]:
     """
-    Verifica se o código gerado contém uma classe/interface/enum 
-    que corresponde ao nome do arquivo físico.
+    Verifies whether the generated code contains a class/interface/enum
+    that matches the physical file name.
     """
     file_name = os.path.basename(file_path).replace(".java", "")
     pattern = rf'(?:public\s+)?(class|interface|enum|record)\s+({file_name})\b'
