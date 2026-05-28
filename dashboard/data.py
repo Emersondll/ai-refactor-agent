@@ -28,11 +28,11 @@ def parse_logs():
 
 
 # ---------------------------------------------------------------------------
-# Fonte primária: execution.jsonl (tem campo "file" por evento)
+# Primary source: execution.jsonl (has per-event "file" field)
 # ---------------------------------------------------------------------------
 
 def _base_file(raw: str) -> str:
-    """S1: descarta ::metodo_assinatura — eventos de método sobem para a classe pai."""
+    """Strips ::method_signature — method events are rolled up to the parent class."""
     return raw.split("::")[0] if raw else raw
 
 
@@ -50,7 +50,7 @@ def _parse_jsonl():
     if not entries:
         return
 
-    # Isola a sessão atual: a partir do último GIT_BRANCH_CREATED
+    # Isolate the current session: start from the last GIT_BRANCH_CREATED event
     session_start = 0
     for i, e in enumerate(entries):
         if e.get("event") == "GIT_BRANCH_CREATED":
@@ -63,21 +63,21 @@ def _parse_jsonl():
         "files_total": 0,
         "files_completed": 0,
         "current_coverage": 0.0,
-        "phase": "Iniciando",
+        "phase": "Starting",
         "avg_seconds_per_file": 0,
     }
 
     steps = []
     seen_files = set()
-    accepted_files = set()  # deduplica: conta cada classe uma única vez
-    accepted_refactor_files = set()  # subset: arquivos de PRODUÇÃO aceitos (exclui testes)
-    # Inserção de CONTEÚDO NOVO no projeto: testes criados do zero (+test) ou
-    # métodos novos adicionados a testes existentes (+complement). NÃO inclui
-    # modificações em código que já existia (+community, +refactor, +javadoc).
+    accepted_files = set()  # deduplicate: count each class only once
+    accepted_refactor_files = set()  # subset: accepted PRODUCTION files (excludes tests)
+    # New content inserted into the project: tests created from scratch (+test) or
+    # new methods added to existing tests (+complement). Does NOT include
+    # modifications to already-existing code (+community, +refactor, +javadoc).
     inserted_new_content_files = set()
     file_start_times = {}   # filename → datetime
-    durations = []          # segundos por arquivo aceito
-    last_file_seen = "Aguardando..."
+    durations = []          # seconds per accepted file
+    last_file_seen = "Waiting..."
     is_complete = False     # S2: True quando PIPELINE_COMPLETE detectado
 
     _INSERTION_CHANGE_TYPES = {"+test", "+complement"}
@@ -95,9 +95,9 @@ def _parse_jsonl():
 
         event       = entry.get("event", "")
         raw_file    = entry.get("file", "")
-        filename    = _base_file(raw_file)   # S1: normalizado sem ::método
+        filename    = _base_file(raw_file)   # S1: normalized without ::method
         message     = entry.get("message", "")
-        # S5: detalhe completo para tooltip (inclui assinatura do método se houver)
+        # S5: full detail for tooltip (includes method signature if present)
         detail      = raw_file if raw_file else message
 
         if event == "FILES_TOTAL":
@@ -144,20 +144,20 @@ def _parse_jsonl():
                     if s["name"] == filename:
                         s["status"] = "processing"
                         s["time"] = ts_str
-                        s["detail"] = detail   # S5: atualiza com método atual
+                        s["detail"] = detail   # S5: update with current method
                         break
 
         elif event == "FILE_ACCEPTED":
             if filename not in accepted_files:
                 accepted_files.add(filename)
                 stats["files_completed"] += 1
-            # Refator de PRODUÇÃO: exclui arquivos de teste (convenção *Test.java).
-            # Files de teste podem ser tocados por fases de community (dead-code,
-            # naming, etc.), mas não contam como "refatoração do projeto".
+            # PRODUCTION refactor: excludes test files (convention *Test.java).
+            # Test files may be touched by community phases (dead-code,
+            # naming, etc.) but do not count as "project refactoring".
             if filename and not filename.endswith("Test.java") and not filename.endswith("Tests.java"):
                 accepted_refactor_files.add(filename)
-            # Inserção de novo conteúdo no projeto (decisão pelo change_type):
-            # apenas +test (teste novo) e +complement (métodos novos em teste).
+            # New content inserted into the project (determined by change_type):
+            # only +test (new test) and +complement (new methods in an existing test).
             _ct_raw = entry.get("change_type") or ""
             if filename and _ct_raw in _INSERTION_CHANGE_TYPES:
                 inserted_new_content_files.add(filename)
@@ -182,6 +182,14 @@ def _parse_jsonl():
                         delta = (ts - file_start_times[filename]).total_seconds()
                         if delta > 0:
                             durations.append(delta)
+                    break
+
+        elif event == "AI_FAILURE":
+            for s in steps:
+                if s["name"] == filename and s["status"] == "processing":
+                    s["status"] = "failed"
+                    s["time"] = ts_str
+                    s["detail"] = detail
                     break
 
         elif event == "FILE_SKIPPED":
@@ -219,7 +227,7 @@ def _parse_jsonl():
 
 
 # ---------------------------------------------------------------------------
-# Fonte secundária: execution.log (texto — sem campo file em FILE_ACCEPTED)
+# Secondary source: execution.log (text — no file field in FILE_ACCEPTED events)
 # ---------------------------------------------------------------------------
 
 
@@ -233,7 +241,7 @@ def _parse_text():
         "files_total": 0,
         "files_completed": 0,
         "current_coverage": 0.0,
-        "phase": "Iniciando",
+        "phase": "Starting",
         "avg_seconds_per_file": 0,
     }
 
@@ -243,7 +251,7 @@ def _parse_text():
     accepted_files = set()
     file_start_times = {}
     durations = []
-    last_file_seen = "Aguardando..."
+    last_file_seen = "Waiting..."
 
     for line in lines:
         if "Cobertura Global Atual" in line or "Cobertura Final Atingida" in line:
@@ -279,7 +287,7 @@ def _parse_text():
                 steps.append({"name": filename, "status": "processing", "time": ts_str})
 
         if "FILE_ACCEPTED" in line:
-            # extrai filename do log de texto: última parte após "|"
+            # extract filename from text log: last segment after "|"
             accepted_name = line.split("|")[-1].strip()
             if accepted_name not in accepted_files:
                 accepted_files.add(accepted_name)
@@ -331,22 +339,22 @@ def _write_output(stats: dict, steps: list, active_file: str, active_elapsed: fl
     except Exception:
         live = {}
 
-    # live_state.current_file é preenchido por llm_runner e flow_runner
-    # quando o JSONL não tem FILE_START ativo (fases LLM não emitem esse evento)
+    # live_state.current_file is populated by llm_runner and flow_runner
+    # when the JSONL has no active FILE_START event (LLM phases do not emit this event)
     display_file = active_file or live.get("current_file", "") or "Aguardando..."
 
-    # % de CONTEÚDO NOVO inserido pelo pipeline (testes criados / complementados).
-    # Numerador: arquivos com FILE_ACCEPTED de change_type +test ou +complement
-    # (código que ORIGINALMENTE NÃO EXISTIA no projeto e foi inserido pelo fluxo).
-    # Denominador: files_total (universo elegível). NÃO confundir com Cobertura
-    # JaCoCo (current_coverage), que mede % de produção exercitada por testes.
+    # % of NEW CONTENT inserted by the pipeline (tests created / complemented).
+    # Numerator: files with FILE_ACCEPTED of change_type +test or +complement
+    # (code that DID NOT EXIST in the project originally and was inserted by the flow).
+    # Denominator: files_total (eligible universe). NOT to be confused with JaCoCo
+    # Coverage (current_coverage), which measures % of production exercised by tests.
     _total = stats.get("files_total", 0) or 0
     _inserted = stats.get("inserted_new_content_count", 0) or 0
     stats["percent_refactored"] = round((_inserted / _total) * 100.0, 1) if _total > 0 else 0.0
 
-    # % SOMENTE de refatoração de produção — denominador = files_total (universo
-    # completo: testes + produção). Numerador = arquivos de produção aceitos
-    # (qualquer fase). Excluímos testes por nome (convenção *Test.java).
+    # % of PRODUCTION-ONLY refactoring — denominator = files_total (full universe:
+    # tests + production). Numerator = accepted production files (any phase).
+    # Tests excluded by name convention (*Test.java).
     _refactor_only = stats.get("accepted_refactor_count", 0) or 0
     stats["percent_refactor_only"] = round((_refactor_only / _total) * 100.0, 1) if _total > 0 else 0.0
 
