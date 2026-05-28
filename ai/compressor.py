@@ -11,6 +11,7 @@ from HuggingFace on first run).
 from config import USE_LLMLINGUA, LLMLINGUA_RATIO
 
 _MIN_CHARS = 800  # Skip compression for short files — overhead not worth it
+_MAX_SEQ_LEN = 512  # BERT-base max sequence length; overflow causes silent indexing errors
 _compressor_instance = None
 
 
@@ -35,6 +36,13 @@ def maybe_compress(code: str) -> str:
         return code
     try:
         compressor = _get_compressor()
+        # Guard: if input exceeds the model's max sequence length, skip compression.
+        # Passing 513+ tokens through the 512-token BERT model causes silent indexing
+        # errors that corrupt the output — safer to return the original unchanged.
+        if hasattr(compressor, 'tokenizer'):
+            token_count = len(compressor.tokenizer.encode(code, add_special_tokens=False))
+            if token_count > _MAX_SEQ_LEN:
+                return code
         result = compressor.compress_prompt(
             code,
             rate=LLMLINGUA_RATIO,
