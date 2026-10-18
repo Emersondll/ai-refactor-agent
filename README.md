@@ -41,6 +41,22 @@ Cada etapa LLM valida o código gerado com `mvn compile` antes de aceitar — qu
 
 ---
 
+## Pré-requisitos
+
+Antes de executar o agente (via `setup.sh` ou manualmente), tenha disponível:
+
+- **Sistema operacional** Linux ou macOS (o `setup.sh` usa `curl`, `sdk` e gerenciadores de pacote tipo Unix).
+- **Python 3.12+** — usado para todo o orquestrador (`main.py`, `ai/`, `java/`, `agent/`).
+- **Java 22** + **Maven** — necessário para compilar e testar o repositório Java alvo. Recomendado instalar via [SDKMAN](https://sdkman.io/) (`sdk install java 22-open`).
+- **Ollama** em execução local (`ollama serve`) com os modelos listados em [Modelos Ollama](#modelos-ollama) já baixados (`ollama pull <modelo>`).
+- **Git** configurado com acesso de escrita ao repositório alvo (`GITHUB_TOKEN` + `GITHUB_USERNAME` no `.env` para repositórios privados).
+- **RAM suficiente** para manter pelo menos 2 modelos Ollama carregados simultaneamente (recomendado 16GB+, mais se usar modelos 14b).
+- Opcional: **ANTHROPIC_API_KEY** apenas se for usar `USE_CLAUDE_FALLBACK=true` ou `PLANNER_MODE=claude`.
+
+O `setup.sh` verifica e instala a maior parte destes itens automaticamente (veja a seção abaixo).
+
+---
+
 ## Instalação rápida com setup.sh
 
 O `setup.sh` é o **ponto de entrada único** para qualquer máquina nova. Ele verifica e instala automaticamente todas as dependências, configura o ambiente e inicia o agente:
